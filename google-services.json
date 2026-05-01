@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "159030423389",
+    "project_id": "tether-8d3fa",
+    "storage_bucket": "tether-8d3fa.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:159030423389:android:91fa07257c2cd097a882b4",
+        "android_client_info": {
+          "package_name": "com.theawesomeray.tether"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCrk44Z9tdR65LnDljKyDrNSHWn12N38nw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
