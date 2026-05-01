@@ -21,7 +21,7 @@ class _HomeScreenState extends State<HomeScreen>
   bool _pokeSent = false;
 
   // Update this to your actual anniversary / together-since date
-  static final DateTime _togetherSince = DateTime(2020, 6, 15);
+  static final DateTime _togetherSince = DateTime(2026, 4, 9);
 
   String get _daysTogether =>
       DateTime.now().difference(_togetherSince).inDays.toString();
