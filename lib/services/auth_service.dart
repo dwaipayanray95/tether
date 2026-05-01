@@ -5,7 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 // Only these two emails are allowed in
 const List<String> allowedEmails = [
   'ray@redacted.invalid', // Ray
-  'aproo@redacted.invalid',          // Aproo — update with her actual email
+  'aproo@redacted.invalid',      // Aproo
 ];
 
 const String coupleId = 'ray-aproo'; // shared ID for Firestore collections
