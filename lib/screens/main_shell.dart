@@ -14,18 +14,20 @@ class MainShell extends StatefulWidget {
 class _MainShellState extends State<MainShell> {
   int _currentIndex = 0;
 
-  static const _screens = [
-    HomeScreen(),
-    ChatScreen(),
-    TodoScreen(),
-  ];
+  void _goToTab(int index) => setState(() => _currentIndex = index);
 
   @override
   Widget build(BuildContext context) {
+    final screens = [
+      HomeScreen(onNavigate: _goToTab),
+      const ChatScreen(),
+      const TodoScreen(),
+    ];
+
     return Scaffold(
       body: IndexedStack(
         index: _currentIndex,
-        children: _screens,
+        children: screens,
       ),
       bottomNavigationBar: Container(
         decoration: const BoxDecoration(
@@ -33,7 +35,7 @@ class _MainShellState extends State<MainShell> {
         ),
         child: BottomNavigationBar(
           currentIndex: _currentIndex,
-          onTap: (i) => setState(() => _currentIndex = i),
+          onTap: _goToTab,
           items: const [
             BottomNavigationBarItem(
               icon: Icon(Icons.home_outlined),
