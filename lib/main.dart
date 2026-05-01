@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'screens/login_screen.dart';
 import 'screens/main_shell.dart';
 import 'theme/app_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Uncomment after adding google-services.json:
-  // await Firebase.initializeApp();
+  await Firebase.initializeApp();
   runApp(const TetherApp());
 }
 
@@ -18,21 +20,17 @@ class TetherApp extends StatelessWidget {
       title: 'Tether',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
-      // Show app directly for now — swap for the StreamBuilder once Firebase is live
-      home: const MainShell(),
-
-      // --- UNCOMMENT after Firebase setup ---
-      // home: StreamBuilder<User?>(
-      //   stream: FirebaseAuth.instance.authStateChanges(),
-      //   builder: (context, snapshot) {
-      //     if (snapshot.connectionState == ConnectionState.waiting) {
-      //       return const Scaffold(
-      //         body: Center(child: CircularProgressIndicator()),
-      //       );
-      //     }
-      //     return snapshot.hasData ? const MainShell() : const LoginScreen();
-      //   },
-      // ),
+      home: StreamBuilder<User?>(
+        stream: FirebaseAuth.instance.authStateChanges(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Scaffold(
+              body: Center(child: CircularProgressIndicator()),
+            );
+          }
+          return snapshot.hasData ? const MainShell() : const LoginScreen();
+        },
+      ),
     );
   }
 }

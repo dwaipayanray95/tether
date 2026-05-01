@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:uuid/uuid.dart';
 import '../models/todo_model.dart';
+import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
 import '../theme/app_theme.dart';
 
@@ -15,7 +16,7 @@ class TodoScreen extends StatefulWidget {
 class _TodoScreenState extends State<TodoScreen> {
   final _firestore = FirestoreService();
   final _textCtrl = TextEditingController();
-  static const String _coupleId = 'ray-aproo';
+  static const String _coupleId = coupleId;
 
   String get _myUid => FirebaseAuth.instance.currentUser?.uid ?? '';
 
