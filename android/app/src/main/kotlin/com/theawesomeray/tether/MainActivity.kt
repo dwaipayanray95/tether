@@ -1,4 +1,4 @@
-package com.raynaproo.tether
+package com.theawesomeray.tether
 
 import io.flutter.embedding.android.FlutterActivity
 
