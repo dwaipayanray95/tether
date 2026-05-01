@@ -12,7 +12,20 @@
           "package_name": "com.theawesomeray.tether"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "159030423389-mvjfacnbs5409ic1fugb3335e2gc65ou.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.theawesomeray.tether",
+            "certificate_hash": "08b2af60be28634cf333f30bf7401166e280f965"
+          }
+        },
+        {
+          "client_id": "159030423389-afh9tvj7u396q3nvdo0fiasakgu8erbu.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyCrk44Z9tdR65LnDljKyDrNSHWn12N38nw"
@@ -20,7 +33,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "159030423389-afh9tvj7u396q3nvdo0fiasakgu8erbu.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }
