@@ -7,10 +7,11 @@ class FirestoreService {
 
   // ── Poke ──────────────────────────────────────────────────────────────────
 
-  Future<void> sendPoke(String fromUid, String toUid) async {
+  Future<void> sendPoke(String fromUid, String toUid, String fromName) async {
     await _db.collection('pokes').add({
       'from': fromUid,
       'to': toUid,
+      'fromName': fromName,
       'sentAt': DateTime.now().toIso8601String(),
     });
   }

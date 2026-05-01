@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import '../models/message_model.dart';
+import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
 import '../theme/app_theme.dart';
 
@@ -20,8 +21,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final _scrollCtrl = ScrollController();
   final _picker = ImagePicker();
 
-  // Replace with your actual couple ID from Firestore after setup
-  static const String _coupleId = 'ray-aproo';
+  static const String _coupleId = coupleId;
 
   String get _myUid => FirebaseAuth.instance.currentUser?.uid ?? '';
 

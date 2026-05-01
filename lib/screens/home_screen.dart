@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
 import '../theme/app_theme.dart';
 
@@ -13,19 +14,17 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin {
-  // ignore: unused_field
-  final _firestoreService = FirestoreService();
+  final _auth = AuthService();
+  final _firestore = FirestoreService();
   late AnimationController _pokeController;
   late Animation<double> _pokeScale;
   bool _pokeSent = false;
 
-  // Hardcoded together-since date — update this later via settings
+  // Update this to your actual anniversary / together-since date
   static final DateTime _togetherSince = DateTime(2020, 6, 15);
 
-  String get _daysTogether {
-    final days = DateTime.now().difference(_togetherSince).inDays;
-    return days.toString();
-  }
+  String get _daysTogether =>
+      DateTime.now().difference(_togetherSince).inDays.toString();
 
   @override
   void initState() {
@@ -50,8 +49,14 @@ class _HomeScreenState extends State<HomeScreen>
     await _pokeController.reverse();
     HapticFeedback.mediumImpact();
     setState(() => _pokeSent = true);
+    await _firestore.sendPoke(
+        _auth.currentUser!.uid, 'partner', _auth.myName);
     await Future.delayed(const Duration(seconds: 2));
     if (mounted) setState(() => _pokeSent = false);
+  }
+
+  Future<void> _signOut() async {
+    await _auth.signOut();
   }
 
   @override
@@ -104,13 +109,31 @@ class _HomeScreenState extends State<HomeScreen>
                 )),
           ],
         ),
-        Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: AppTheme.primaryLight,
-            borderRadius: BorderRadius.circular(14),
+        GestureDetector(
+          onTap: () => showDialog(
+            context: context,
+            builder: (_) => AlertDialog(
+              title: const Text('Sign out?'),
+              content: Text('Signing out as ${_auth.myName}'),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel')),
+                TextButton(
+                    onPressed: _signOut,
+                    child: const Text('Sign out',
+                        style: TextStyle(color: Colors.red))),
+              ],
+            ),
           ),
-          child: const Icon(Icons.favorite, color: AppTheme.primary, size: 22),
+          child: Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppTheme.primaryLight,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: const Icon(Icons.favorite, color: AppTheme.primary, size: 22),
+          ),
         ),
       ],
     );
@@ -178,12 +201,12 @@ class _HomeScreenState extends State<HomeScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Poke',
+                Text('Poke ${_auth.partnerName}',
                     style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 4),
                 Text(
                   _pokeSent
-                      ? 'Poke sent! 💕'
+                      ? '${_auth.partnerName} has been poked! 💕'
                       : 'Let them know you\'re thinking of them',
                   style: Theme.of(context)
                       .textTheme
@@ -197,14 +220,12 @@ class _HomeScreenState extends State<HomeScreen>
           ScaleTransition(
             scale: _pokeScale,
             child: GestureDetector(
-              onTap: _sendPoke,
+              onTap: _pokeSent ? null : _sendPoke,
               child: Container(
                 width: 52,
                 height: 52,
                 decoration: BoxDecoration(
-                  color: _pokeSent
-                      ? AppTheme.primaryLight
-                      : AppTheme.primaryLight,
+                  color: AppTheme.primaryLight,
                   borderRadius: BorderRadius.circular(16),
                 ),
                 child: Icon(
