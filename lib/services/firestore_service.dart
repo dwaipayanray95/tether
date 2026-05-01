@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/todo_model.dart';
+import '../models/comment_model.dart';
 import '../models/message_model.dart';
 
 class FirestoreService {
@@ -63,6 +64,33 @@ class FirestoreService {
         .collection('todos')
         .doc(todoId)
         .delete();
+  }
+
+  // ── Todo Comments ─────────────────────────────────────────────────────────
+
+  Stream<List<TodoComment>> commentStream(String coupleId, String todoId) {
+    return _db
+        .collection('couples')
+        .doc(coupleId)
+        .collection('todos')
+        .doc(todoId)
+        .collection('comments')
+        .orderBy('createdAt', descending: false)
+        .snapshots()
+        .map((snap) => snap.docs
+            .map((d) => TodoComment.fromMap(d.id, d.data()))
+            .toList());
+  }
+
+  Future<void> addComment(
+      String coupleId, String todoId, TodoComment comment) {
+    return _db
+        .collection('couples')
+        .doc(coupleId)
+        .collection('todos')
+        .doc(todoId)
+        .collection('comments')
+        .add(comment.toMap());
   }
 
   // ── Chat ──────────────────────────────────────────────────────────────────

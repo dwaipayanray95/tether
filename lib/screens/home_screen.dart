@@ -6,7 +6,9 @@ import '../services/firestore_service.dart';
 import '../theme/app_theme.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  final void Function(int) onNavigate;
+
+  const HomeScreen({super.key, required this.onNavigate});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -253,9 +255,11 @@ class _HomeScreenState extends State<HomeScreen>
         const SizedBox(height: 12),
         Row(
           children: [
-            _actionTile(Icons.check_circle_outline_rounded, 'To-do', () {}),
+            _actionTile(Icons.check_circle_outline_rounded, 'To-do',
+                () => widget.onNavigate(2)),
             const SizedBox(width: 12),
-            _actionTile(Icons.chat_bubble_outline_rounded, 'Chat', () {}),
+            _actionTile(Icons.chat_bubble_outline_rounded, 'Chat',
+                () => widget.onNavigate(1)),
             const SizedBox(width: 12),
             _actionTile(Icons.photo_library_outlined, 'Photos', () {}),
           ],
