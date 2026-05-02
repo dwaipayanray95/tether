@@ -1,0 +1,30 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAllowed() {
+      return request.auth != null &&
+        request.auth.token.email in [
+          'dwaipayanray95@gmail.com',
+          'apoo.0404@gmail.com'
+        ];
+    }
+
+    match /users/{userId} {
+      allow read, write: if isAllowed();
+    }
+
+    match /couples/{coupleId}/{document=**} {
+      allow read, write: if isAllowed();
+    }
+
+    match /pokes/{pokeId} {
+      allow read, write: if isAllowed();
+    }
+
+    // Deny everything else
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
