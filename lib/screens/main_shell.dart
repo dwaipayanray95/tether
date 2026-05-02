@@ -3,6 +3,7 @@ import 'home_screen.dart';
 import 'chat_screen.dart';
 import 'todo_screen.dart';
 import '../theme/app_theme.dart';
+import '../widgets/update_dialog.dart';
 
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
@@ -15,6 +16,17 @@ class _MainShellState extends State<MainShell> {
   int _currentIndex = 0;
 
   void _goToTab(int index) => setState(() => _currentIndex = index);
+
+  @override
+  void initState() {
+    super.initState();
+    // Check for updates a few seconds after the app loads
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Future.delayed(const Duration(seconds: 3), () {
+        if (mounted) UpdateDialog.checkAndShow(context);
+      });
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
