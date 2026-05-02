@@ -20,29 +20,37 @@ class _ChatScreenState extends State<ChatScreen> {
   final _textCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
   final _picker = ImagePicker();
-
   static const String _coupleId = coupleId;
 
   String get _myUid => FirebaseAuth.instance.currentUser?.uid ?? '';
+
+  @override
+  void initState() {
+    super.initState();
+    // Mark all partner messages as read when chat opens
+    _firestore.markMessagesRead(_coupleId, _myUid);
+  }
 
   Future<void> _send() async {
     final text = _textCtrl.text.trim();
     if (text.isEmpty) return;
     _textCtrl.clear();
-    final msg = Message(
-      id: const Uuid().v4(),
-      senderId: _myUid,
-      text: text,
-      type: MessageType.text,
-      sentAt: DateTime.now(),
+    await _firestore.sendMessage(
+      _coupleId,
+      Message(
+        id: const Uuid().v4(),
+        senderId: _myUid,
+        text: text,
+        type: MessageType.text,
+        sentAt: DateTime.now(),
+        readBy: [_myUid],
+      ),
     );
-    await _firestore.sendMessage(_coupleId, msg);
   }
 
   Future<void> _pickImage() async {
     final img = await _picker.pickImage(source: ImageSource.gallery);
     if (img == null) return;
-    // TODO: upload to Firebase Storage and send as image message
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -75,6 +83,11 @@ class _ChatScreenState extends State<ChatScreen> {
             child: StreamBuilder<List<Message>>(
               stream: _firestore.messageStream(_coupleId),
               builder: (context, snap) {
+                // Mark as read whenever new messages arrive
+                if (snap.hasData) {
+                  _firestore.markMessagesRead(_coupleId, _myUid);
+                }
+
                 if (!snap.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
@@ -99,11 +112,14 @@ class _ChatScreenState extends State<ChatScreen> {
                 return ListView.builder(
                   controller: _scrollCtrl,
                   reverse: true,
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 12),
                   itemCount: messages.length,
                   itemBuilder: (ctx, i) => _MessageBubble(
                     message: messages[i],
                     isMe: messages[i].senderId == _myUid,
+                    // Show receipt only on the most recent message I sent
+                    showReceipt: i == 0 && messages[i].senderId == _myUid,
                   ),
                 );
               },
@@ -151,8 +167,8 @@ class _ChatScreenState extends State<ChatScreen> {
                   color: AppTheme.primary,
                   shape: BoxShape.circle,
                 ),
-                child:
-                    const Icon(Icons.send_rounded, color: Colors.white, size: 18),
+                child: const Icon(Icons.send_rounded,
+                    color: Colors.white, size: 18),
               ),
             ),
           ],
@@ -162,53 +178,96 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 }
 
+// ── Message bubble ────────────────────────────────────────────────────────────
+
 class _MessageBubble extends StatelessWidget {
   final Message message;
   final bool isMe;
+  final bool showReceipt;
 
-  const _MessageBubble({required this.message, required this.isMe});
+  const _MessageBubble({
+    required this.message,
+    required this.isMe,
+    required this.showReceipt,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final isRead = message.readBy.length > 1; // partner has read it
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
         mainAxisAlignment:
             isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          Container(
-            constraints: BoxConstraints(
-                maxWidth: MediaQuery.of(context).size.width * 0.72),
-            padding:
-                const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              color: isMe ? AppTheme.primary : AppTheme.surface,
-              borderRadius: BorderRadius.only(
-                topLeft: const Radius.circular(18),
-                topRight: const Radius.circular(18),
-                bottomLeft: Radius.circular(isMe ? 18 : 4),
-                bottomRight: Radius.circular(isMe ? 4 : 18),
+          if (!isMe)
+            Padding(
+              padding: const EdgeInsets.only(right: 6, bottom: 4),
+              child: CircleAvatar(
+                radius: 12,
+                backgroundColor: AppTheme.primaryLight,
+                child: Text(
+                  'A',
+                  style: const TextStyle(
+                      fontSize: 10,
+                      color: AppTheme.primary,
+                      fontWeight: FontWeight.w600),
+                ),
               ),
-              border:
-                  isMe ? null : Border.all(color: AppTheme.divider),
             ),
+          Flexible(
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
+              crossAxisAlignment:
+                  isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
               children: [
-                Text(
-                  message.text,
-                  style: TextStyle(
-                    color: isMe ? Colors.white : AppTheme.textDark,
-                    fontSize: 15,
+                Container(
+                  constraints: BoxConstraints(
+                      maxWidth:
+                          MediaQuery.of(context).size.width * 0.72),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: isMe ? AppTheme.primary : AppTheme.surface,
+                    borderRadius: BorderRadius.only(
+                      topLeft: const Radius.circular(18),
+                      topRight: const Radius.circular(18),
+                      bottomLeft: Radius.circular(isMe ? 18 : 4),
+                      bottomRight: Radius.circular(isMe ? 4 : 18),
+                    ),
+                    border: isMe ? null : Border.all(color: AppTheme.divider),
+                  ),
+                  child: Text(
+                    message.text,
+                    style: TextStyle(
+                      color: isMe ? Colors.white : AppTheme.textDark,
+                      fontSize: 15,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 3),
-                Text(
-                  timeago.format(message.sentAt, locale: 'en_short'),
-                  style: TextStyle(
-                    color: isMe ? Colors.white54 : AppTheme.textMuted,
-                    fontSize: 10,
-                  ),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      timeago.format(message.sentAt, locale: 'en_short'),
+                      style: const TextStyle(
+                          color: AppTheme.textMuted, fontSize: 10),
+                    ),
+                    if (isMe && showReceipt) ...[
+                      const SizedBox(width: 4),
+                      Icon(
+                        isRead
+                            ? Icons.done_all_rounded
+                            : Icons.done_rounded,
+                        size: 14,
+                        color: isRead
+                            ? AppTheme.primary
+                            : AppTheme.textMuted,
+                      ),
+                    ],
+                  ],
                 ),
               ],
             ),

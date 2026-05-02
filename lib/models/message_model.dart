@@ -7,6 +7,7 @@ class Message {
   final MessageType type;
   final String? imageUrl;
   final DateTime sentAt;
+  final List<String> readBy; // list of UIDs who have read this message
 
   const Message({
     required this.id,
@@ -15,6 +16,7 @@ class Message {
     required this.type,
     this.imageUrl,
     required this.sentAt,
+    this.readBy = const [],
   });
 
   factory Message.fromMap(String id, Map<String, dynamic> map) {
@@ -25,6 +27,7 @@ class Message {
       type: MessageType.values.byName(map['type'] as String? ?? 'text'),
       imageUrl: map['imageUrl'] as String?,
       sentAt: DateTime.parse(map['sentAt'] as String),
+      readBy: List<String>.from(map['readBy'] as List? ?? []),
     );
   }
 
@@ -34,5 +37,6 @@ class Message {
         'type': type.name,
         'imageUrl': imageUrl,
         'sentAt': sentAt.toIso8601String(),
+        'readBy': readBy,
       };
 }
