@@ -1,3 +1,8 @@
+# Functions build output and dependencies
+functions/lib/
+functions/node_modules/
+functions/package-lock.json
+
 # Miscellaneous
 *.class
 *.log
