@@ -35,9 +35,8 @@ class FirestoreService {
         .collection('todos')
         .orderBy('createdAt', descending: false)
         .snapshots()
-        .map((snap) => snap.docs
-            .map((d) => TodoItem.fromMap(d.id, d.data()))
-            .toList());
+        .map((snap) =>
+            snap.docs.map((d) => TodoItem.fromMap(d.id, d.data())).toList());
   }
 
   Future<void> addTodo(String coupleId, TodoItem todo) {
@@ -55,6 +54,16 @@ class FirestoreService {
         .collection('todos')
         .doc(todo.id)
         .update({'isDone': !todo.isDone});
+  }
+
+  Future<void> updateTodoDetails(
+      String coupleId, String todoId, String details) {
+    return _db
+        .collection('couples')
+        .doc(coupleId)
+        .collection('todos')
+        .doc(todoId)
+        .update({'details': details});
   }
 
   Future<void> deleteTodo(String coupleId, String todoId) {
@@ -93,6 +102,18 @@ class FirestoreService {
         .add(comment.toMap());
   }
 
+  Future<void> deleteComment(
+      String coupleId, String todoId, String commentId) {
+    return _db
+        .collection('couples')
+        .doc(coupleId)
+        .collection('todos')
+        .doc(todoId)
+        .collection('comments')
+        .doc(commentId)
+        .delete();
+  }
+
   // ── Chat ──────────────────────────────────────────────────────────────────
 
   Stream<List<Message>> messageStream(String coupleId) {
@@ -115,6 +136,26 @@ class FirestoreService {
         .add(message.toMap());
   }
 
+  Future<void> markMessagesRead(String coupleId, String myUid) async {
+    final snap = await _db
+        .collection('couples')
+        .doc(coupleId)
+        .collection('messages')
+        .where('senderId', isNotEqualTo: myUid)
+        .get();
+
+    final batch = _db.batch();
+    for (final doc in snap.docs) {
+      final readBy = List<String>.from(doc.data()['readBy'] as List? ?? []);
+      if (!readBy.contains(myUid)) {
+        batch.update(doc.reference, {
+          'readBy': FieldValue.arrayUnion([myUid])
+        });
+      }
+    }
+    await batch.commit();
+  }
+
   // ── Couple profile ────────────────────────────────────────────────────────
 
   Future<Map<String, dynamic>?> getCoupleProfile(String coupleId) async {
@@ -124,6 +165,9 @@ class FirestoreService {
 
   Future<void> updateCoupleProfile(
       String coupleId, Map<String, dynamic> data) {
-    return _db.collection('couples').doc(coupleId).set(data, SetOptions(merge: true));
+    return _db
+        .collection('couples')
+        .doc(coupleId)
+        .set(data, SetOptions(merge: true));
   }
 }
