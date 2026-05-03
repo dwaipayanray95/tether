@@ -37,13 +37,20 @@ jobs:
       - name: Decode keystore
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > $HOME/tether-release.jks
+          ls -la $HOME/tether-release.jks
 
       - name: Write key.properties
         run: |
-          printf 'storePassword=%s\nkeyPassword=%s\nkeyAlias=tether\nstoreFile=%s/tether-release.jks\n' \
-            '${{ secrets.KEYSTORE_PASSWORD }}' \
-            '${{ secrets.KEY_PASSWORD }}' \
-            "$HOME" > android/key.properties
+          echo "storePassword=${{ secrets.KEYSTORE_PASSWORD }}" > android/key.properties
+          echo "keyPassword=${{ secrets.KEY_PASSWORD }}" >> android/key.properties
+          echo "keyAlias=tether" >> android/key.properties
+          echo "storeFile=$HOME/tether-release.jks" >> android/key.properties
+
+      - name: Verify keystore
+        run: |
+          keytool -list -keystore $HOME/tether-release.jks \
+            -storepass "${{ secrets.KEYSTORE_PASSWORD }}" \
+            -alias tether
 
       - name: Build APK
         run: flutter build apk --release --no-shrink
