@@ -40,12 +40,10 @@ jobs:
 
       - name: Write key.properties
         run: |
-          cat > android/key.properties <<EOF
-          storePassword=${{ secrets.KEYSTORE_PASSWORD }}
-          keyPassword=${{ secrets.KEY_PASSWORD }}
-          keyAlias=tether
-          storeFile=$HOME/tether-release.jks
-          EOF
+          printf 'storePassword=%s\nkeyPassword=%s\nkeyAlias=tether\nstoreFile=%s/tether-release.jks\n' \
+            '${{ secrets.KEYSTORE_PASSWORD }}' \
+            '${{ secrets.KEY_PASSWORD }}' \
+            "$HOME" > android/key.properties
 
       - name: Build APK
         run: flutter build apk --release --no-shrink
