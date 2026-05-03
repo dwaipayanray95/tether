@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
 import '../theme/app_theme.dart';
+import 'location_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final void Function(int) onNavigate;
@@ -261,7 +262,10 @@ class _HomeScreenState extends State<HomeScreen>
             _actionTile(Icons.chat_bubble_outline_rounded, 'Chat',
                 () => widget.onNavigate(1)),
             const SizedBox(width: 12),
-            _actionTile(Icons.photo_library_outlined, 'Photos', () {}),
+            _actionTile(Icons.location_on_outlined, 'Location', () {
+              Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => const LocationScreen()));
+            }),
           ],
         ),
       ],
