@@ -1,78 +1,137 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'nav_service.dart';
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  // Background messages are shown automatically by FCM — nothing to do here
+  // FCM shows background notifications automatically when payload has
+  // a 'notification' field — nothing extra needed here.
 }
 
 class NotificationService {
   static final FirebaseMessaging _messaging = FirebaseMessaging.instance;
+  static final FlutterLocalNotificationsPlugin _local =
+      FlutterLocalNotificationsPlugin();
 
-  static Future<void> initialize(BuildContext context) async {
-    // Request permission (required on Android 13+)
-    await _messaging.requestPermission(
-      alert: true,
-      badge: true,
-      sound: true,
-    );
+  static const _channel = AndroidNotificationChannel(
+    'tether_default',
+    'Tether',
+    description: 'Messages, pokes and to-dos',
+    importance: Importance.high,
+    playSound: true,
+  );
 
-    // Register background handler
+  // Set to true by ChatScreen while it is mounted and visible
+  static bool chatIsOpen = false;
+
+  static Future<void> initialize() async {
+    await _messaging.requestPermission(alert: true, badge: true, sound: true);
+
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
-    // Save token to Firestore so Cloud Functions can target this device
+    // Create Android notification channel
+    await _local
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(_channel);
+
+    // Initialise local notifications
+    await _local.initialize(
+      const InitializationSettings(
+        android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+      ),
+      onDidReceiveNotificationResponse: (response) {
+        _navigateFromPayload(response.payload);
+      },
+    );
+
+    // Save / refresh FCM token
     final token = await _messaging.getToken();
     if (token != null) await _saveToken(token);
-
-    // Refresh token when it changes
     _messaging.onTokenRefresh.listen(_saveToken);
 
-    // Show a banner for messages received while app is open
+    // Foreground FCM → show local notification
     FirebaseMessaging.onMessage.listen((message) {
-      final notification = message.notification;
-      if (notification == null) return;
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(notification.title ?? '',
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w600, color: Colors.white)),
-                if (notification.body != null)
-                  Text(notification.body!,
-                      style: const TextStyle(color: Colors.white70)),
-              ],
-            ),
-            backgroundColor: const Color(0xFFE8715A),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12)),
-            margin: const EdgeInsets.all(12),
-            duration: const Duration(seconds: 4),
-          ),
-        );
-      }
+      final type = message.data['type'] as String? ?? '';
+      // Suppress chat banner if user is already in chat
+      if (type == 'chat' && chatIsOpen) return;
+
+      final n = message.notification;
+      if (n == null) return;
+      _showLocal(
+        title: n.title ?? '',
+        body: n.body ?? '',
+        payload: type,
+      );
     });
+
+    // Notification tap while app was in background
+    FirebaseMessaging.onMessageOpenedApp.listen((message) {
+      _navigateFromPayload(message.data['type'] as String?);
+    });
+
+    // Notification tap that cold-started the app
+    final initial = await _messaging.getInitialMessage();
+    if (initial != null) {
+      // Delay so the navigator is ready
+      Future.delayed(const Duration(milliseconds: 500), () {
+        _navigateFromPayload(initial.data['type'] as String?);
+      });
+    }
+  }
+
+  static void _navigateFromPayload(String? type) {
+    // For now all notification types go to the relevant tab
+    // chat → tab 1, everything else → tab 0 (home)
+    final context = navigatorKey.currentContext;
+    if (context == null) return;
+    if (type == 'chat') {
+      // Tell MainShell to switch to chat tab
+      NotificationService.pendingTab = 1;
+    }
+  }
+
+  // MainShell reads and clears this after build
+  static int? pendingTab;
+
+  static Future<void> _showLocal({
+    required String title,
+    required String body,
+    String? payload,
+  }) async {
+    await _local.show(
+      title.hashCode ^ body.hashCode,
+      title,
+      body,
+      NotificationDetails(
+        android: AndroidNotificationDetails(
+          _channel.id,
+          _channel.name,
+          channelDescription: _channel.description,
+          importance: Importance.high,
+          priority: Priority.high,
+          playSound: true,
+          enableVibration: true,
+          icon: '@mipmap/ic_launcher',
+        ),
+      ),
+      payload: payload,
+    );
   }
 
   static Future<void> _saveToken(String token) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
 
-    // Save under users collection (legacy)
     await FirebaseFirestore.instance
         .collection('users')
         .doc(uid)
         .set({'fcmToken': token}, SetOptions(merge: true));
 
-    // Also save under couple doc keyed by name so partner can look it up
-    final email = FirebaseAuth.instance.currentUser?.email ?? '';
     const rayEmail = 'ray@redacted.invalid';
+    final email = FirebaseAuth.instance.currentUser?.email ?? '';
     final myName = email == rayEmail ? 'ray' : 'aproo';
     await FirebaseFirestore.instance
         .collection('couples')

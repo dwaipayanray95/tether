@@ -21,6 +21,7 @@ class FirestoreService {
       partnerName: partnerName,
       title: '💕 $fromName poked you!',
       body: 'Open the app to poke back',
+      type: 'poke',
     );
   }
 
@@ -57,6 +58,7 @@ class FirestoreService {
       partnerName: partnerName,
       title: '✅ New task added',
       body: '${todo.createdBy}: ${todo.title}',
+      type: 'todo',
     );
   }
 
@@ -118,6 +120,7 @@ class FirestoreService {
       partnerName: partnerName,
       title: '🗨️ ${comment.authorName} commented',
       body: '${comment.text} · $todoTitle',
+      type: 'comment',
     );
   }
 
@@ -163,6 +166,7 @@ class FirestoreService {
         partnerName: partnerName,
         title: senderName,
         body: preview,
+        type: 'chat',
       );
     }
   }
@@ -185,6 +189,61 @@ class FirestoreService {
       }
     }
     await batch.commit();
+  }
+
+  Stream<int> unreadCountStream(String coupleId, String myUid) {
+    return _db
+        .collection('couples')
+        .doc(coupleId)
+        .collection('messages')
+        .snapshots()
+        .map((snap) => snap.docs.where((doc) {
+              final data = doc.data();
+              if (data['senderId'] == myUid) return false;
+              final readBy =
+                  List<String>.from(data['readBy'] as List? ?? []);
+              return !readBy.contains(myUid);
+            }).length);
+  }
+
+  Future<void> toggleReaction(
+      String coupleId, String messageId, String emoji, String myUid) async {
+    final ref = _db
+        .collection('couples')
+        .doc(coupleId)
+        .collection('messages')
+        .doc(messageId);
+    final snap = await ref.get();
+    final data = snap.data() ?? {};
+    final rawReactions = Map<String, dynamic>.from(data['reactions'] ?? {});
+    final uids =
+        List<String>.from(rawReactions[emoji] ?? []);
+    if (uids.contains(myUid)) {
+      uids.remove(myUid);
+    } else {
+      uids.add(myUid);
+    }
+    if (uids.isEmpty) {
+      rawReactions.remove(emoji);
+    } else {
+      rawReactions[emoji] = uids;
+    }
+    await ref.update({'reactions': rawReactions});
+  }
+
+  // ── Presence / last seen ─────────────────────────────────────────────────
+
+  Future<void> updatePresence(String myKey, {bool isOnline = true}) async {
+    await _db.doc('couples/ray-aproo/presence/$myKey').set({
+      'lastSeen': FieldValue.serverTimestamp(),
+      'isOnline': isOnline,
+    }, SetOptions(merge: true));
+  }
+
+  Stream<DocumentSnapshot<Map<String, dynamic>>> presenceStream(String key) {
+    return _db
+        .doc('couples/ray-aproo/presence/$key')
+        .snapshots();
   }
 
   // ── Couple profile ────────────────────────────────────────────────────────

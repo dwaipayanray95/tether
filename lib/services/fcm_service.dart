@@ -68,6 +68,7 @@ class FcmService {
     required String partnerName,
     required String title,
     required String body,
+    String type = 'general',
   }) async {
     try {
       final token = await _getPartnerToken(partnerName);
@@ -81,9 +82,14 @@ class FcmService {
           'message': {
             'token': token,
             'notification': {'title': title, 'body': body},
+            'data': {'type': type},
             'android': {
               'priority': 'high',
-              'notification': {'channel_id': 'tether_default'},
+              'notification': {
+                'channel_id': 'tether_default',
+                'default_sound': true,
+                'default_vibrate_timings': true,
+              },
             },
           },
         },
