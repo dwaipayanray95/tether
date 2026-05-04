@@ -7,7 +7,10 @@ class Message {
   final MessageType type;
   final String? imageUrl;
   final DateTime sentAt;
-  final List<String> readBy; // list of UIDs who have read this message
+  final List<String> readBy;
+  final String? replyToId;
+  final String? replyToText;
+  final Map<String, List<String>> reactions; // emoji → [uids]
 
   const Message({
     required this.id,
@@ -17,9 +20,16 @@ class Message {
     this.imageUrl,
     required this.sentAt,
     this.readBy = const [],
+    this.replyToId,
+    this.replyToText,
+    this.reactions = const {},
   });
 
   factory Message.fromMap(String id, Map<String, dynamic> map) {
+    final rawReactions = map['reactions'] as Map<String, dynamic>? ?? {};
+    final reactions = rawReactions.map(
+      (k, v) => MapEntry(k, List<String>.from(v as List)),
+    );
     return Message(
       id: id,
       senderId: map['senderId'] as String,
@@ -28,6 +38,9 @@ class Message {
       imageUrl: map['imageUrl'] as String?,
       sentAt: DateTime.parse(map['sentAt'] as String),
       readBy: List<String>.from(map['readBy'] as List? ?? []),
+      replyToId: map['replyToId'] as String?,
+      replyToText: map['replyToText'] as String?,
+      reactions: reactions,
     );
   }
 
@@ -38,5 +51,8 @@ class Message {
         'imageUrl': imageUrl,
         'sentAt': sentAt.toIso8601String(),
         'readBy': readBy,
+        if (replyToId != null) 'replyToId': replyToId,
+        if (replyToText != null) 'replyToText': replyToText,
+        if (reactions.isNotEmpty) 'reactions': reactions,
       };
 }
