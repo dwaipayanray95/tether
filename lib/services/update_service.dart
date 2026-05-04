@@ -51,11 +51,15 @@ class UpdateService {
     }
   }
 
-  static Future<void> downloadAndInstall(
+  static Future<String?> downloadAndInstall(
     String url,
     void Function(double progress) onProgress,
   ) async {
-    final dir = await getTemporaryDirectory();
+    // Download to external cache so FileProvider can serve it
+    final dirs = await getExternalCacheDirectories();
+    final dir = dirs?.isNotEmpty == true
+        ? dirs!.first
+        : await getTemporaryDirectory();
     final path = '${dir.path}/tether-update.apk';
 
     final dio = Dio();
@@ -67,15 +71,28 @@ class UpdateService {
       },
     );
 
-    await OpenFile.open(path);
+    final result = await OpenFile.open(
+      path,
+      type: 'application/vnd.android.package-archive',
+    );
+
+    // Return error message if installation failed, null if successful
+    if (result.type != ResultType.done) {
+      return result.message;
+    }
+    return null;
   }
 
   static bool _isNewer(String latest, String current) {
     try {
       final l = latest.split('.').map(int.parse).toList();
       final c = current.split('.').map(int.parse).toList();
-      while (l.length < 3) { l.add(0); }
-      while (c.length < 3) { c.add(0); }
+      while (l.length < 3) {
+        l.add(0);
+      }
+      while (c.length < 3) {
+        c.add(0);
+      }
       for (int i = 0; i < 3; i++) {
         if (l[i] > c[i]) return true;
         if (l[i] < c[i]) return false;

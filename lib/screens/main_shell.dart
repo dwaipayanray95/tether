@@ -36,7 +36,12 @@ class _MainShellState extends State<MainShell> {
       const TodoScreen(),
     ];
 
-    return Scaffold(
+    return PopScope(
+      canPop: _currentIndex == 0,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) setState(() => _currentIndex = 0);
+      },
+      child: Scaffold(
       body: IndexedStack(
         index: _currentIndex,
         children: screens,
@@ -67,6 +72,6 @@ class _MainShellState extends State<MainShell> {
           ],
         ),
       ),
-    );
+    ));
   }
 }
