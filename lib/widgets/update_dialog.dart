@@ -28,11 +28,29 @@ class _UpdateDialogState extends State<UpdateDialog> {
   Future<void> _download() async {
     setState(() => _progress = 0);
     try {
-      await UpdateService.downloadAndInstall(
+      final error = await UpdateService.downloadAndInstall(
         widget.info.downloadUrl,
         (p) => setState(() => _progress = p),
       );
-      setState(() => _done = true);
+      if (error != null) {
+        // Installation failed — likely needs "Install unknown apps" enabled
+        setState(() => _progress = null);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: const Text(
+              'To install: go to Settings → Apps → Tether → Install unknown apps → Allow',
+            ),
+            backgroundColor: const Color(0xFFE8715A),
+            behavior: SnackBarBehavior.floating,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            margin: const EdgeInsets.all(12),
+            duration: const Duration(seconds: 6),
+          ));
+        }
+      } else {
+        setState(() => _done = true);
+      }
     } catch (_) {
       setState(() => _progress = null);
       if (mounted) {
