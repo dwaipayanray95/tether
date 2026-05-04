@@ -39,6 +39,11 @@ jobs:
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > $HOME/tether-release.jks
           ls -la $HOME/tether-release.jks
 
+      - name: Decode notification config
+        run: |
+          mkdir -p lib/config
+          echo "${{ secrets.NOTIFICATION_CONFIG_BASE64 }}" | base64 --decode > lib/config/notification_config.dart
+
       - name: Write key.properties
         run: |
           echo "storePassword=${{ secrets.KEYSTORE_PASSWORD }}" > android/key.properties

@@ -1,7 +1,7 @@
 name: tether
 description: "Tether - Ray & Aproo"
 publish_to: 'none'
-version: 1.0.3+3
+version: 1.0.4+4
 
 environment:
   sdk: ^3.11.5
@@ -37,6 +37,7 @@ dependencies:
   path_provider: ^2.1.5
   google_maps_flutter: ^2.9.0
   geolocator: ^13.0.2
+  dart_jsonwebtoken: ^2.8.0
 
 dev_dependencies:
   flutter_test:

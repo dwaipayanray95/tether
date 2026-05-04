@@ -344,6 +344,7 @@ class _TodoDetailSheetState extends State<_TodoDetailSheet> {
         authorName: widget.myName,
         createdAt: DateTime.now(),
       ),
+      widget.todo.title,
     );
     if (mounted) setState(() => _sending = false);
   }
