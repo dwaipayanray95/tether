@@ -1,3 +1,6 @@
+# Sensitive config — never commit
+lib/config/notification_config.dart
+
 # Functions build output and dependencies
 functions/lib/
 functions/node_modules/

@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/todo_model.dart';
 import '../models/comment_model.dart';
 import '../models/message_model.dart';
+import 'fcm_service.dart';
 
 class FirestoreService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -15,6 +16,12 @@ class FirestoreService {
       'fromName': fromName,
       'sentAt': DateTime.now().toIso8601String(),
     });
+    final partnerName = fromName == 'Ray' ? 'aproo' : 'ray';
+    FcmService.send(
+      partnerName: partnerName,
+      title: '💕 $fromName poked you!',
+      body: 'Open the app to poke back',
+    );
   }
 
   Stream<QuerySnapshot> pokeStream(String toUid) {
@@ -39,12 +46,18 @@ class FirestoreService {
             snap.docs.map((d) => TodoItem.fromMap(d.id, d.data())).toList());
   }
 
-  Future<void> addTodo(String coupleId, TodoItem todo) {
-    return _db
+  Future<void> addTodo(String coupleId, TodoItem todo) async {
+    await _db
         .collection('couples')
         .doc(coupleId)
         .collection('todos')
         .add(todo.toMap());
+    final partnerName = todo.createdBy == 'Ray' ? 'aproo' : 'ray';
+    FcmService.send(
+      partnerName: partnerName,
+      title: '✅ New task added',
+      body: '${todo.createdBy}: ${todo.title}',
+    );
   }
 
   Future<void> toggleTodo(String coupleId, TodoItem todo) {
@@ -92,14 +105,20 @@ class FirestoreService {
   }
 
   Future<void> addComment(
-      String coupleId, String todoId, TodoComment comment) {
-    return _db
+      String coupleId, String todoId, TodoComment comment, String todoTitle) async {
+    await _db
         .collection('couples')
         .doc(coupleId)
         .collection('todos')
         .doc(todoId)
         .collection('comments')
         .add(comment.toMap());
+    final partnerName = comment.authorName == 'Ray' ? 'aproo' : 'ray';
+    FcmService.send(
+      partnerName: partnerName,
+      title: '🗨️ ${comment.authorName} commented',
+      body: '${comment.text} · $todoTitle',
+    );
   }
 
   Future<void> deleteComment(
@@ -128,12 +147,24 @@ class FirestoreService {
             snap.docs.map((d) => Message.fromMap(d.id, d.data())).toList());
   }
 
-  Future<void> sendMessage(String coupleId, Message message) {
-    return _db
+  Future<void> sendMessage(String coupleId, Message message,
+      {String senderName = ''}) async {
+    await _db
         .collection('couples')
         .doc(coupleId)
         .collection('messages')
         .add(message.toMap());
+    if (senderName.isNotEmpty) {
+      final partnerName = senderName == 'Ray' ? 'aproo' : 'ray';
+      final preview = message.text.length > 60
+          ? '${message.text.substring(0, 60)}…'
+          : message.text;
+      FcmService.send(
+        partnerName: partnerName,
+        title: senderName,
+        body: preview,
+      );
+    }
   }
 
   Future<void> markMessagesRead(String coupleId, String myUid) async {

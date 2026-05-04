@@ -63,9 +63,22 @@ class NotificationService {
   static Future<void> _saveToken(String token) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
+
+    // Save under users collection (legacy)
     await FirebaseFirestore.instance
         .collection('users')
         .doc(uid)
         .set({'fcmToken': token}, SetOptions(merge: true));
+
+    // Also save under couple doc keyed by name so partner can look it up
+    final email = FirebaseAuth.instance.currentUser?.email ?? '';
+    const rayEmail = 'dwaipayanray95@gmail.com';
+    final myName = email == rayEmail ? 'ray' : 'aproo';
+    await FirebaseFirestore.instance
+        .collection('couples')
+        .doc('ray-aproo')
+        .collection('fcmTokens')
+        .doc(myName)
+        .set({'token': token});
   }
 }

@@ -17,6 +17,7 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen> {
   final _firestore = FirestoreService();
+  final _auth = AuthService();
   final _textCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
   final _picker = ImagePicker();
@@ -45,6 +46,7 @@ class _ChatScreenState extends State<ChatScreen> {
         sentAt: DateTime.now(),
         readBy: [_myUid],
       ),
+      senderName: _auth.myName,
     );
   }
 
