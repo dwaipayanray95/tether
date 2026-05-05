@@ -7,6 +7,7 @@ import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
 import '../services/auth_service.dart';
 import '../services/call_service.dart';
 import '../services/webrtc_service.dart';
+import '../services/proximity_service.dart';
 import '../services/log_service.dart';
 import '../theme/app_theme.dart';
 
@@ -57,6 +58,7 @@ class _CallScreenState extends State<CallScreen> {
   @override
   void initState() {
     super.initState();
+    ProximityService.acquire(); // dim screen when held to ear
     _start();
   }
 
@@ -65,6 +67,7 @@ class _CallScreenState extends State<CallScreen> {
     _durationTimer?.cancel();
     _disconnectedSub?.cancel();
     _stopRingtone();
+    ProximityService.release();
     _webrtc.dispose();
     super.dispose();
   }
