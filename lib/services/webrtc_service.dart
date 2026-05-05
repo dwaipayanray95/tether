@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'log_service.dart';
 
 /// Wraps a single WebRTC peer connection for a voice call.
 /// Video tracks are not created here — audio only.
@@ -14,6 +15,10 @@ class WebRtcService {
   RTCPeerConnection? _pc;
   MediaStream? _localStream;
 
+  /// Whether setRemoteDescription has completed — guards ICE candidate queueing.
+  bool _remoteDescriptionSet = false;
+  final List<RTCIceCandidate> _pendingCandidates = [];
+
   /// Fires each time a new ICE candidate is gathered locally.
   final _iceCandidateController =
       StreamController<RTCIceCandidate>.broadcast();
@@ -27,15 +32,18 @@ class WebRtcService {
   // ── Setup ─────────────────────────────────────────────────────────────────
 
   Future<void> init() async {
+    LogService.log('Initializing WebRTC PeerConnection');
     _pc = await createPeerConnection(_iceServers);
 
     _pc!.onIceCandidate = (candidate) {
+      LogService.log('Local ICE candidate gathered');
       if (!_iceCandidateController.isClosed) {
         _iceCandidateController.add(candidate);
       }
     };
 
     _pc!.onConnectionState = (state) {
+      LogService.log('WebRTC Connection State: $state');
       if (state == RTCPeerConnectionState.RTCPeerConnectionStateDisconnected ||
           state == RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
           state == RTCPeerConnectionState.RTCPeerConnectionStateClosed) {
@@ -46,6 +54,7 @@ class WebRtcService {
     };
 
     // Capture microphone audio
+    LogService.log('Requesting microphone access');
     _localStream = await navigator.mediaDevices.getUserMedia({
       'audio': true,
       'video': false,
@@ -59,22 +68,41 @@ class WebRtcService {
   // ── Offer / Answer ────────────────────────────────────────────────────────
 
   Future<RTCSessionDescription> createOffer() async {
+    LogService.log('Creating WebRTC Offer');
     final offer = await _pc!.createOffer({'offerToReceiveAudio': true});
     await _pc!.setLocalDescription(offer);
     return offer;
   }
 
   Future<RTCSessionDescription> createAnswer() async {
+    LogService.log('Creating WebRTC Answer');
     final answer = await _pc!.createAnswer({'offerToReceiveAudio': true});
     await _pc!.setLocalDescription(answer);
     return answer;
   }
 
   Future<void> setRemoteDescription(RTCSessionDescription sdp) async {
+    LogService.log('Setting WebRTC Remote Description');
     await _pc!.setRemoteDescription(sdp);
+    _remoteDescriptionSet = true;
+    // Flush any candidates that arrived before remote description was ready
+    if (_pendingCandidates.isNotEmpty) {
+      LogService.log('Flushing ${_pendingCandidates.length} queued ICE candidates');
+      for (final c in _pendingCandidates) {
+        await _pc!.addCandidate(c);
+      }
+      _pendingCandidates.clear();
+    }
   }
 
+  /// Adds a remote ICE candidate — queued if remote description not yet set.
   Future<void> addIceCandidate(RTCIceCandidate candidate) async {
+    if (!_remoteDescriptionSet) {
+      LogService.log('Queuing remote ICE candidate (remote desc not set yet)');
+      _pendingCandidates.add(candidate);
+      return;
+    }
+    LogService.log('Adding Remote ICE candidate');
     await _pc!.addCandidate(candidate);
   }
 
@@ -87,12 +115,19 @@ class WebRtcService {
   // ── Teardown ──────────────────────────────────────────────────────────────
 
   Future<void> dispose() async {
+    if (_pc == null) return; // Guard against double-dispose
+    LogService.log('Disposing WebRTC Service');
     _localStream?.getTracks().forEach((t) => t.stop());
     await _localStream?.dispose();
     _localStream = null;
     await _pc?.close();
     _pc = null;
-    await _iceCandidateController.close();
-    await _disconnectedController.close();
+    _pendingCandidates.clear();
+    if (!_iceCandidateController.isClosed) {
+      await _iceCandidateController.close();
+    }
+    if (!_disconnectedController.isClosed) {
+      await _disconnectedController.close();
+    }
   }
 }
