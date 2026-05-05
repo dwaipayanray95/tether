@@ -78,23 +78,27 @@ class FcmService {
       final accessToken = await _getAccessToken();
       final dio = Dio();
       final data = <String, String>{'type': type, ...?extra};
+
+      // Call notifications are data-only: the background handler shows a
+      // full-screen local notification instead of relying on FCM auto-display.
+      final isCall = type == 'call';
+      final messageBody = <String, dynamic>{
+        'token': token,
+        'data': data,
+        'android': {'priority': 'high'},
+      };
+      if (!isCall) {
+        messageBody['notification'] = {'title': title, 'body': body};
+        (messageBody['android'] as Map)['notification'] = {
+          'channel_id': 'tether_default',
+          'default_sound': true,
+          'default_vibrate_timings': true,
+        };
+      }
+
       await dio.post(
         _fcmUrl,
-        data: {
-          'message': {
-            'token': token,
-            'notification': {'title': title, 'body': body},
-            'data': data,
-            'android': {
-              'priority': 'high',
-              'notification': {
-                'channel_id': 'tether_default',
-                'default_sound': true,
-                'default_vibrate_timings': true,
-              },
-            },
-          },
-        },
+        data: {'message': messageBody},
         options: Options(
           headers: {'Authorization': 'Bearer $accessToken'},
           validateStatus: (_) => true,

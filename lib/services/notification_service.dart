@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -6,26 +7,82 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'nav_service.dart';
 import 'location_service.dart';
 import 'auth_service.dart';
+import 'log_service.dart';
+
+// ── Background handler (runs in a separate isolate) ───────────────────────────
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
-  if (message.data['type'] == 'ping') {
+  LogService.log('Background FCM received: ${message.data}');
+
+  final type = message.data['type'] as String? ?? '';
+
+  if (type == 'ping') {
     final auth = AuthService();
     final myKey = auth.isRay ? 'ray' : 'aproo';
     final pos = await LocationService.getCurrentPosition();
     if (pos != null) {
       await LocationService.forceUpload(pos, myKey, auth.myName);
     }
+    return;
+  }
+
+  if (type == 'call') {
+    final callId = message.data['callId'] as String?;
+    final callerName =
+        message.data['callerName'] as String? ?? 'Your partner';
+    if (callId == null) return;
+
+    // Initialise local notifications in this background isolate
+    final local = FlutterLocalNotificationsPlugin();
+    await local
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(NotificationService._callChannel);
+    await local.initialize(
+      const InitializationSettings(
+        android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+      ),
+    );
+
+    LogService.log('Showing full-screen call notification for: $callId');
+    await local.show(
+      callId.hashCode,
+      '📞 $callerName is calling…',
+      'Tap to answer',
+      NotificationDetails(
+        android: AndroidNotificationDetails(
+          NotificationService._callChannel.id,
+          NotificationService._callChannel.name,
+          channelDescription:
+              NotificationService._callChannel.description,
+          importance: Importance.max,
+          priority: Priority.max,
+          fullScreenIntent: true,
+          category: AndroidNotificationCategory.call,
+          playSound: true,
+          enableVibration: true,
+          ongoing: true,
+          autoCancel: false,
+          timeoutAfter: 60000, // dismiss after 60 s if unanswered
+          icon: '@mipmap/ic_launcher',
+        ),
+      ),
+      payload: jsonEncode({'type': 'call', 'callId': callId}),
+    );
   }
 }
+
+// ── NotificationService ───────────────────────────────────────────────────────
 
 class NotificationService {
   static final FirebaseMessaging _messaging = FirebaseMessaging.instance;
   static final FlutterLocalNotificationsPlugin _local =
       FlutterLocalNotificationsPlugin();
 
-  static const _channel = AndroidNotificationChannel(
+  // Default channel — messages, pokes, to-dos
+  static const _defaultChannel = AndroidNotificationChannel(
     'tether_default',
     'Tether',
     description: 'Messages, pokes and to-dos',
@@ -33,39 +90,70 @@ class NotificationService {
     playSound: true,
   );
 
+  // Call channel — max importance so fullScreenIntent works
+  static const _callChannel = AndroidNotificationChannel(
+    'tether_calls',
+    'Incoming Calls',
+    description: 'Incoming voice calls from your partner',
+    importance: Importance.max,
+    playSound: true,
+    enableVibration: true,
+  );
+
   // Set to true by ChatScreen while it is mounted and visible
   static bool chatIsOpen = false;
 
+  // ── Pending navigation set before MainShell reads them ───────────────────
+  static int? pendingTab;
+  static String? pendingCallId;
+
+  // ── init ─────────────────────────────────────────────────────────────────
+
   static Future<void> initialize() async {
+    LogService.log('Initializing NotificationService');
     await _messaging.requestPermission(alert: true, badge: true, sound: true);
 
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
-    // Create Android notification channel
-    await _local
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(_channel);
+    // Create Android notification channels
+    final androidPlugin = _local.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    await androidPlugin?.createNotificationChannel(_defaultChannel);
+    await androidPlugin?.createNotificationChannel(_callChannel);
 
     // Initialise local notifications
     await _local.initialize(
       const InitializationSettings(
         android: AndroidInitializationSettings('@mipmap/ic_launcher'),
       ),
-      onDidReceiveNotificationResponse: (response) {
+      onDidReceiveNotificationResponse: (NotificationResponse response) {
+        LogService.log(
+            'Local notification tapped: payload=${response.payload}');
         _navigateFromPayload(response.payload);
       },
     );
+
+    // Handle app launched BY a local notification (e.g. full-screen call tap)
+    final launchDetails = await _local.getNotificationAppLaunchDetails();
+    if (launchDetails?.didNotificationLaunchApp == true) {
+      final payload = launchDetails?.notificationResponse?.payload;
+      LogService.log('App launched by local notification: payload=$payload');
+      if (payload != null) {
+        Future.delayed(const Duration(milliseconds: 500),
+            () => _navigateFromPayload(payload));
+      }
+    }
 
     // Save / refresh FCM token
     final token = await _messaging.getToken();
     if (token != null) await _saveToken(token);
     _messaging.onTokenRefresh.listen(_saveToken);
 
-    // Foreground FCM → show local notification
+    // Foreground FCM → show local notification (calls are handled by Firestore stream)
     FirebaseMessaging.onMessage.listen((message) async {
+      LogService.log('Foreground FCM received: ${message.data}');
       final type = message.data['type'] as String? ?? '';
-      
+
       if (type == 'ping') {
         final auth = AuthService();
         final myKey = auth.isRay ? 'ray' : 'aproo';
@@ -73,7 +161,12 @@ class NotificationService {
         if (pos != null) {
           await LocationService.forceUpload(pos, myKey, auth.myName);
         }
+        return;
       }
+
+      // Calls in foreground are handled by the Firestore real-time stream in
+      // MainShell — skip showing a notification so there's no duplicate.
+      if (type == 'call') return;
 
       // Suppress chat banner if user is already in chat
       if (type == 'chat' && chatIsOpen) return;
@@ -83,41 +176,50 @@ class NotificationService {
       _showLocal(
         title: n.title ?? '',
         body: n.body ?? '',
-        payload: type,
+        payload: jsonEncode(message.data),
       );
     });
 
-    // Notification tap while app was in background
+    // Notification tap while app was in background (FCM notification)
     FirebaseMessaging.onMessageOpenedApp.listen((message) {
-      _navigateFromPayload(message.data['type'] as String?, message.data);
+      LogService.log('FCM notification tapped (background): ${message.data}');
+      _navigateFromPayload(jsonEncode(message.data));
     });
 
-    // Notification tap that cold-started the app
+    // Notification tap that cold-started the app (FCM notification)
     final initial = await _messaging.getInitialMessage();
     if (initial != null) {
-      // Delay so the navigator is ready
+      LogService.log(
+          'FCM notification tapped (cold start): ${initial.data}');
       Future.delayed(const Duration(milliseconds: 500), () {
-        _navigateFromPayload(initial.data['type'] as String?, initial.data);
+        _navigateFromPayload(jsonEncode(initial.data));
       });
     }
   }
 
-  static void _navigateFromPayload(String? type, [Map<String, dynamic>? data]) {
-    final context = navigatorKey.currentContext;
-    if (context == null) return;
-    if (type == 'chat') {
-      NotificationService.pendingTab = 1;
-    } else if (type == 'call') {
-      final callId = data?['callId'] as String?;
-      if (callId != null) {
-        NotificationService.pendingCallId = callId;
+  // ── Navigation ────────────────────────────────────────────────────────────
+
+  static void _navigateFromPayload(String? payload) {
+    if (payload == null) return;
+    try {
+      final data = jsonDecode(payload) as Map<String, dynamic>;
+      final type = data['type'] as String?;
+
+      final context = navigatorKey.currentContext;
+      if (context == null) return;
+
+      if (type == 'chat') {
+        pendingTab = 1;
+      } else if (type == 'call') {
+        final callId = data['callId'] as String?;
+        if (callId != null) pendingCallId = callId;
       }
+    } catch (e) {
+      LogService.log('Error parsing notification payload: $e');
     }
   }
 
-  // MainShell reads and clears these after build
-  static int? pendingTab;
-  static String? pendingCallId; // incoming call id from a tapped notification
+  // ── Helpers ───────────────────────────────────────────────────────────────
 
   static Future<void> _showLocal({
     required String title,
@@ -130,9 +232,9 @@ class NotificationService {
       body,
       NotificationDetails(
         android: AndroidNotificationDetails(
-          _channel.id,
-          _channel.name,
-          channelDescription: _channel.description,
+          _defaultChannel.id,
+          _defaultChannel.name,
+          channelDescription: _defaultChannel.description,
           importance: Importance.high,
           priority: Priority.high,
           playSound: true,
