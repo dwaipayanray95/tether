@@ -14,6 +14,7 @@ import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
 import '../services/notification_service.dart';
 import '../theme/app_theme.dart';
+import 'call_screen.dart';
 
 const _reactionEmojis = [
   '❤️', '😂', '😍', '👍', '💃', '🥳',
@@ -252,6 +253,15 @@ class ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  void _startCall() {
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => CallScreen(
+        isOutgoing: true,
+        partnerName: _auth.partnerName,
+      ),
+    ));
+  }
+
   Future<void> _activateSearch() async {
     setState(() => _searchActive = true);
     // Eagerly load full message history for search
@@ -323,6 +333,10 @@ class ChatScreenState extends State<ChatScreen> {
             IconButton(
               icon: const Icon(Icons.search_rounded),
               onPressed: _activateSearch,
+            ),
+            IconButton(
+              icon: const Icon(Icons.call_rounded),
+              onPressed: _startCall,
             ),
             Container(
               margin: const EdgeInsets.only(right: 16),

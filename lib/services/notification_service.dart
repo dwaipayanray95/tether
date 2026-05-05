@@ -89,7 +89,7 @@ class NotificationService {
 
     // Notification tap while app was in background
     FirebaseMessaging.onMessageOpenedApp.listen((message) {
-      _navigateFromPayload(message.data['type'] as String?);
+      _navigateFromPayload(message.data['type'] as String?, message.data);
     });
 
     // Notification tap that cold-started the app
@@ -97,24 +97,27 @@ class NotificationService {
     if (initial != null) {
       // Delay so the navigator is ready
       Future.delayed(const Duration(milliseconds: 500), () {
-        _navigateFromPayload(initial.data['type'] as String?);
+        _navigateFromPayload(initial.data['type'] as String?, initial.data);
       });
     }
   }
 
-  static void _navigateFromPayload(String? type) {
-    // For now all notification types go to the relevant tab
-    // chat → tab 1, everything else → tab 0 (home)
+  static void _navigateFromPayload(String? type, [Map<String, dynamic>? data]) {
     final context = navigatorKey.currentContext;
     if (context == null) return;
     if (type == 'chat') {
-      // Tell MainShell to switch to chat tab
       NotificationService.pendingTab = 1;
+    } else if (type == 'call') {
+      final callId = data?['callId'] as String?;
+      if (callId != null) {
+        NotificationService.pendingCallId = callId;
+      }
     }
   }
 
-  // MainShell reads and clears this after build
+  // MainShell reads and clears these after build
   static int? pendingTab;
+  static String? pendingCallId; // incoming call id from a tapped notification
 
   static Future<void> _showLocal({
     required String title,

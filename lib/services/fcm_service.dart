@@ -69,6 +69,7 @@ class FcmService {
     required String title,
     required String body,
     String type = 'general',
+    Map<String, String>? extra,
   }) async {
     try {
       final token = await _getPartnerToken(partnerName);
@@ -76,13 +77,14 @@ class FcmService {
 
       final accessToken = await _getAccessToken();
       final dio = Dio();
+      final data = <String, String>{'type': type, ...?extra};
       await dio.post(
         _fcmUrl,
         data: {
           'message': {
             'token': token,
             'notification': {'title': title, 'body': body},
-            'data': {'type': type},
+            'data': data,
             'android': {
               'priority': 'high',
               'notification': {
