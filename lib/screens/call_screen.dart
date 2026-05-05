@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
 import '../services/auth_service.dart';
 import '../services/call_service.dart';
 import '../services/webrtc_service.dart';
@@ -100,12 +101,26 @@ class _CallScreenState extends State<CallScreen> {
   Future<void> _answerIncoming() async {
     _callId = widget.callId!;
 
-    // Forward callee candidates as they gather
+    // 1. Fetch the offer from Firestore
+    final doc = await CallService.getCall(_callId!);
+    final data = doc.data();
+    if (data == null || data['offer'] == null) {
+      _hangUp();
+      return;
+    }
+
+    final offerMap = Map<String, dynamic>.from(data['offer']);
+    final offer = RTCSessionDescription(offerMap['sdp'], offerMap['type']);
+
+    // 2. Set remote description (the offer)
+    await _webrtc.setRemoteDescription(offer);
+
+    // 3. Forward callee candidates as they gather
     _webrtc.onIceCandidate.listen((c) {
       CallService.sendCalleeCandidate(_callId!, c);
     });
 
-    // Write the answer + listen for caller candidates
+    // 4. Create and send the answer
     final answer = await _webrtc.createAnswer();
     await CallService.answerCall(
       callId: _callId!,
@@ -152,6 +167,7 @@ class _CallScreenState extends State<CallScreen> {
     if (_state == _CallState.ended) return;
     setState(() => _state = _CallState.ended);
     _durationTimer?.cancel();
+    _disconnectedSub?.cancel(); // Cancel before dispose to prevent re-trigger
     if (_callId != null && !remote) {
       await CallService.endCall(_callId!);
     }
