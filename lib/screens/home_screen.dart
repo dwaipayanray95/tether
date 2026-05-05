@@ -10,11 +10,17 @@ import '../services/firestore_service.dart';
 import '../services/location_service.dart';
 import '../theme/app_theme.dart';
 import 'settings_screen.dart';
+import 'search_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final void Function(int) onNavigate;
+  final void Function(String messageId)? onSelectMessage;
 
-  const HomeScreen({super.key, required this.onNavigate});
+  const HomeScreen({
+    super.key,
+    required this.onNavigate,
+    this.onSelectMessage,
+  });
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -237,6 +243,27 @@ class _HomeScreenState extends State<HomeScreen>
         ),
         Row(
           children: [
+            GestureDetector(
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => SearchScreen(
+                    onNavigate: widget.onNavigate,
+                    onSelectMessage: widget.onSelectMessage,
+                  ),
+                ),
+              ),
+              child: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryLight,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(Icons.search_rounded,
+                    color: AppTheme.primary, size: 22),
+              ),
+            ),
+            const SizedBox(width: 10),
             GestureDetector(
               onTap: () => Navigator.push(
                 context,

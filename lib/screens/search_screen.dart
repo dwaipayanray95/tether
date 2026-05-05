@@ -10,8 +10,15 @@ import '../theme/app_theme.dart';
 
 class SearchScreen extends StatefulWidget {
   final void Function(int) onNavigate;
+  /// Called with a message id when the user taps a message result.
+  /// The caller (MainShell) is responsible for switching to chat and scrolling.
+  final void Function(String messageId)? onSelectMessage;
 
-  const SearchScreen({super.key, required this.onNavigate});
+  const SearchScreen({
+    super.key,
+    required this.onNavigate,
+    this.onSelectMessage,
+  });
 
   @override
   State<SearchScreen> createState() => _SearchScreenState();
@@ -25,7 +32,7 @@ class _SearchScreenState extends State<SearchScreen> {
   String _query = '';
   List<Message> _allMessages = [];
   List<TodoItem> _allTodos = [];
-  StreamSubscription<List<Message>>? _msgSub;
+  bool _loadingMessages = false;
   StreamSubscription<List<TodoItem>>? _todoSub;
 
   String get _myUid => FirebaseAuth.instance.currentUser?.uid ?? '';
@@ -33,18 +40,22 @@ class _SearchScreenState extends State<SearchScreen> {
   @override
   void initState() {
     super.initState();
-    _msgSub = _firestore.messageStream(_coupleId).listen((msgs) {
-      if (mounted) setState(() => _allMessages = msgs);
-    });
+    // Load full message history once for search
+    _loadMessages();
     _todoSub = _firestore.todoStream(_coupleId).listen((todos) {
       if (mounted) setState(() => _allTodos = todos);
     });
   }
 
+  Future<void> _loadMessages() async {
+    setState(() => _loadingMessages = true);
+    final all = await _firestore.getAllMessages(_coupleId);
+    if (mounted) setState(() { _allMessages = all; _loadingMessages = false; });
+  }
+
   @override
   void dispose() {
     _searchCtrl.dispose();
-    _msgSub?.cancel();
     _todoSub?.cancel();
     super.dispose();
   }
@@ -88,7 +99,16 @@ class _SearchScreenState extends State<SearchScreen> {
           onChanged: (v) => setState(() => _query = v.trim()),
         ),
         actions: [
-          if (_query.isNotEmpty)
+          if (_loadingMessages)
+            const Padding(
+              padding: EdgeInsets.all(14),
+              child: SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            )
+          else if (_query.isNotEmpty)
             IconButton(
               icon: const Icon(Icons.close),
               onPressed: () {
@@ -145,6 +165,13 @@ class _SearchScreenState extends State<SearchScreen> {
                             onTap: () {
                               Navigator.pop(context);
                               widget.onNavigate(1);
+                              // After navigation completes, scroll to message
+                              if (widget.onSelectMessage != null) {
+                                Future.delayed(
+                                  const Duration(milliseconds: 300),
+                                  () => widget.onSelectMessage!(m.id),
+                                );
+                              }
                             },
                           )),
                     ],

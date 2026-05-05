@@ -79,7 +79,16 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     }
 
     final screens = [
-      HomeScreen(onNavigate: _goToTab),
+      HomeScreen(
+        onNavigate: _goToTab,
+        onSelectMessage: (id) {
+          // Switch to chat tab first, then scroll once it's mounted
+          setState(() => _currentIndex = 1);
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _chatKey.currentState?.scrollToMessageById(id);
+          });
+        },
+      ),
       ChatScreen(key: _chatKey),
       const TodoScreen(),
     ];

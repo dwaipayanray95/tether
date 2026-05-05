@@ -1,6 +1,11 @@
+import 'dart:async';
+import 'dart:math' show max;
+
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import 'package:uuid/uuid.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import 'package:intl/intl.dart';
@@ -27,7 +32,139 @@ class ChatScreen extends StatefulWidget {
 
 class ChatScreenState extends State<ChatScreen> {
   final _firestore = FirestoreService();
+  final _auth = AuthService();
+  final _textCtrl = TextEditingController();
+  final _searchCtrl = TextEditingController();
+  static const String _coupleId = coupleId;
+
+  // Scroll
+  final _itemScrollController = ItemScrollController();
+  final _itemPositionsListener = ItemPositionsListener.create();
+
+  // Pagination state
+  List<Message> _messages = [];
+  DocumentSnapshot? _pageCursor;
+  bool _isLoadingMore = false;
+  bool _hasMore = true;
+  bool _initialLoading = true;
+  StreamSubscription<List<Message>>? _streamSub;
+
+  // Highlight
+  String? _highlightedId;
+
+  // Reply
+  Message? _replyTo;
+
+  // Search
+  bool _searchActive = false;
+  String _searchQuery = '';
+  List<Message>? _allMessages; // null = not yet loaded
+  bool _loadingAllMessages = false;
+
+  String get _myUid => FirebaseAuth.instance.currentUser?.uid ?? '';
   bool get isSearchActive => _searchActive;
+
+  // ── Lifecycle ────────────────────────────────────────────────────────────────
+
+  @override
+  void initState() {
+    super.initState();
+    NotificationService.chatIsOpen = true;
+    _loadInitialMessages();
+    _itemPositionsListener.itemPositions.addListener(_onPositionsChanged);
+  }
+
+  @override
+  void dispose() {
+    NotificationService.chatIsOpen = false;
+    _streamSub?.cancel();
+    _itemPositionsListener.itemPositions.removeListener(_onPositionsChanged);
+    _textCtrl.dispose();
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  // ── Data loading ─────────────────────────────────────────────────────────────
+
+  Future<void> _loadInitialMessages() async {
+    final result = await _firestore.fetchMessagePage(_coupleId, 50);
+    if (!mounted) return;
+    setState(() {
+      _messages = result.messages;
+      _pageCursor = result.cursor;
+      _hasMore = result.messages.length == 50;
+      _initialLoading = false;
+    });
+    _firestore.markMessagesRead(_coupleId, _myUid);
+
+    // Real-time stream for new messages + live updates (reactions, readBy)
+    _streamSub = _firestore.messageStream(_coupleId).listen(_onStreamUpdate);
+  }
+
+  void _onStreamUpdate(List<Message> streamMessages) {
+    if (!mounted) return;
+    setState(() {
+      final existingIds = {for (final m in _messages) m.id};
+      // Prepend any genuinely new messages (not yet in our list)
+      final newOnes = streamMessages
+          .where((m) => !existingIds.contains(m.id))
+          .toList();
+      // Update existing messages in-place (reactions, readBy, etc.)
+      final streamMap = {for (final m in streamMessages) m.id: m};
+      final updated = _messages.map((m) => streamMap[m.id] ?? m).toList();
+      _messages = [...newOnes, ...updated];
+    });
+    _firestore.markMessagesRead(_coupleId, _myUid);
+  }
+
+  void _onPositionsChanged() {
+    if (_isLoadingMore || !_hasMore || _messages.isEmpty) return;
+    final positions = _itemPositionsListener.itemPositions.value;
+    if (positions.isEmpty) return;
+    final maxIdx = positions.map((p) => p.index).reduce(max);
+    // In reversed list index 0 is newest; high index = oldest.
+    // Load more when user is near the oldest loaded message.
+    if (maxIdx >= _messages.length - 10) {
+      _loadMoreMessages();
+    }
+  }
+
+  Future<void> _loadMoreMessages() async {
+    if (_isLoadingMore || !_hasMore || _pageCursor == null) return;
+    setState(() => _isLoadingMore = true);
+    final result = await _firestore.fetchMessagePage(
+      _coupleId,
+      50,
+      startAfter: _pageCursor,
+    );
+    if (!mounted) return;
+    setState(() {
+      final existingIds = {for (final m in _messages) m.id};
+      final newOnes =
+          result.messages.where((m) => !existingIds.contains(m.id)).toList();
+      _messages = [..._messages, ...newOnes];
+      _pageCursor = result.cursor;
+      _hasMore = result.messages.length == 50;
+      _isLoadingMore = false;
+    });
+  }
+
+  // ── Public API (called by MainShell / SearchScreen) ──────────────────────────
+
+  /// Scroll to the message with [id] and briefly highlight it.
+  void scrollToMessageById(String id) {
+    final idx = _messages.indexWhere((m) => m.id == id);
+    if (idx == -1) return;
+    _itemScrollController.scrollTo(
+      index: idx,
+      duration: const Duration(milliseconds: 400),
+      curve: Curves.easeInOut,
+    );
+    setState(() => _highlightedId = id);
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _highlightedId = null);
+    });
+  }
 
   void closeSearch() {
     if (mounted) {
@@ -39,35 +176,7 @@ class ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  final _scrollCtrl = ScrollController();
-  final _auth = AuthService();
-  final _textCtrl = TextEditingController();
-  static const String _coupleId = coupleId;
-
-  Message? _replyTo;
-
-  // Search
-  bool _searchActive = false;
-  String _searchQuery = '';
-  final _searchCtrl = TextEditingController();
-
-  String get _myUid => FirebaseAuth.instance.currentUser?.uid ?? '';
-
-  @override
-  void initState() {
-    super.initState();
-    NotificationService.chatIsOpen = true;
-    _firestore.markMessagesRead(_coupleId, _myUid);
-  }
-
-  @override
-  void dispose() {
-    NotificationService.chatIsOpen = false;
-    _textCtrl.dispose();
-    _scrollCtrl.dispose();
-    _searchCtrl.dispose();
-    super.dispose();
-  }
+  // ── Actions ──────────────────────────────────────────────────────────────────
 
   void _setReply(Message message) {
     HapticFeedback.lightImpact();
@@ -132,8 +241,7 @@ class ChatScreenState extends State<ChatScreen> {
                           _toggleReaction(message.id, e);
                         },
                         child: Center(
-                          child: Text(e,
-                              style: const TextStyle(fontSize: 28)),
+                          child: Text(e, style: const TextStyle(fontSize: 28)),
                         ),
                       ))
                   .toList(),
@@ -142,6 +250,30 @@ class ChatScreenState extends State<ChatScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _activateSearch() async {
+    setState(() => _searchActive = true);
+    // Eagerly load full message history for search
+    if (_allMessages == null && !_loadingAllMessages) {
+      setState(() => _loadingAllMessages = true);
+      final all = await _firestore.getAllMessages(_coupleId);
+      if (mounted) {
+        setState(() {
+          _allMessages = all;
+          _loadingAllMessages = false;
+        });
+      }
+    }
+  }
+
+  // ── Build ─────────────────────────────────────────────────────────────────────
+
+  List<Message> get _displayMessages {
+    if (_searchQuery.isEmpty) return _messages;
+    final source = _allMessages ?? _messages;
+    final q = _searchQuery.toLowerCase();
+    return source.where((m) => m.text.toLowerCase().contains(q)).toList();
   }
 
   @override
@@ -161,7 +293,7 @@ class ChatScreenState extends State<ChatScreen> {
                 controller: _searchCtrl,
                 autofocus: true,
                 decoration: const InputDecoration(
-                  hintText: 'Search messages…',
+                  hintText: 'Search all messages…',
                   border: InputBorder.none,
                   hintStyle: TextStyle(color: AppTheme.textMuted),
                 ),
@@ -171,17 +303,26 @@ class ChatScreenState extends State<ChatScreen> {
             : const Text('Ray & Aproo'),
         actions: [
           if (_searchActive)
-            IconButton(
-              icon: const Icon(Icons.close),
-              onPressed: () {
-                _searchCtrl.clear();
-                setState(() => _searchQuery = '');
-              },
-            )
+            _loadingAllMessages
+                ? const Padding(
+                    padding: EdgeInsets.all(14),
+                    child: SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                : IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () {
+                      _searchCtrl.clear();
+                      setState(() => _searchQuery = '');
+                    },
+                  )
           else ...[
             IconButton(
               icon: const Icon(Icons.search_rounded),
-              onPressed: () => setState(() => _searchActive = true),
+              onPressed: _activateSearch,
             ),
             Container(
               margin: const EdgeInsets.only(right: 16),
@@ -197,85 +338,97 @@ class ChatScreenState extends State<ChatScreen> {
       ),
       body: Column(
         children: [
-          Expanded(
-            child: StreamBuilder<List<Message>>(
-              stream: _firestore.messageStream(_coupleId),
-              builder: (context, snap) {
-                if (snap.hasData) {
-                  _firestore.markMessagesRead(_coupleId, _myUid);
-                }
-                if (!snap.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                final allMessages = snap.data!;
-                final messages = _searchQuery.isEmpty
-                    ? allMessages
-                    : allMessages
-                        .where((m) => m.text
-                            .toLowerCase()
-                            .contains(_searchQuery.toLowerCase()))
-                        .toList();
-                if (allMessages.isEmpty) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(Icons.chat_bubble_outline,
-                            size: 48, color: AppTheme.textMuted),
-                        const SizedBox(height: 12),
-                        Text('Send your first message!',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodyMedium
-                                ?.copyWith(color: AppTheme.textMuted)),
-                      ],
-                    ),
-                  );
-                }
-                if (messages.isEmpty && _searchQuery.isNotEmpty) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(Icons.search_off_rounded,
-                            size: 48, color: AppTheme.textMuted),
-                        const SizedBox(height: 12),
-                        Text('No messages found for "$_searchQuery"',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodyMedium
-                                ?.copyWith(color: AppTheme.textMuted)),
-                      ],
-                    ),
-                  );
-                }
-                return ListView.builder(
-                  controller: _scrollCtrl,
-                  reverse: true,
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 12),
-                  itemCount: messages.length,
-                  itemBuilder: (ctx, i) => _SwipeableMessage(
-                    isMe: messages[i].senderId == _myUid,
-                    onReply: () => _setReply(messages[i]),
-                    child: _MessageBubble(
-                      message: messages[i],
-                      isMe: messages[i].senderId == _myUid,
-                      showReceipt: i == 0 && messages[i].senderId == _myUid,
-                      myUid: _myUid,
-                      onLongPress: () => _showReactionPicker(messages[i]),
-                      onReaction: (emoji) =>
-                          _toggleReaction(messages[i].id, emoji),
-                      searchQuery: _searchQuery,
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
+          Expanded(child: _buildMessageList()),
           if (!_searchActive) _buildInput(),
         ],
       ),
+    );
+  }
+
+  Widget _buildMessageList() {
+    if (_initialLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    final display = _displayMessages;
+
+    if (_messages.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.chat_bubble_outline,
+                size: 48, color: AppTheme.textMuted),
+            const SizedBox(height: 12),
+            Text('Send your first message!',
+                style: Theme.of(context)
+                    .textTheme
+                    .bodyMedium
+                    ?.copyWith(color: AppTheme.textMuted)),
+          ],
+        ),
+      );
+    }
+
+    if (display.isEmpty && _searchQuery.isNotEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.search_off_rounded,
+                size: 48, color: AppTheme.textMuted),
+            const SizedBox(height: 12),
+            Text('No messages found for "$_searchQuery"',
+                style: Theme.of(context)
+                    .textTheme
+                    .bodyMedium
+                    ?.copyWith(color: AppTheme.textMuted)),
+          ],
+        ),
+      );
+    }
+
+    // +1 slot at the end (top of screen) for load-more indicator
+    final itemCount = display.length + (_isLoadingMore ? 1 : 0);
+
+    return ScrollablePositionedList.builder(
+      reverse: true,
+      itemScrollController: _itemScrollController,
+      itemPositionsListener: _itemPositionsListener,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      itemCount: itemCount,
+      itemBuilder: (ctx, i) {
+        if (i == display.length) {
+          // Load-more spinner at the visual top (oldest end)
+          return const Padding(
+            padding: EdgeInsets.all(16),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+        final msg = display[i];
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 500),
+          color: msg.id == _highlightedId
+              ? AppTheme.primary.withValues(alpha: 0.12)
+              : Colors.transparent,
+          child: _SwipeableMessage(
+            isMe: msg.senderId == _myUid,
+            onReply: () => _setReply(msg),
+            child: _MessageBubble(
+              message: msg,
+              isMe: msg.senderId == _myUid,
+              showReceipt: i == 0 && msg.senderId == _myUid,
+              myUid: _myUid,
+              onLongPress: () => _showReactionPicker(msg),
+              onReaction: (emoji) => _toggleReaction(msg.id, emoji),
+              onReplyTap: msg.replyToId != null
+                  ? () => scrollToMessageById(msg.replyToId!)
+                  : null,
+              searchQuery: _searchQuery,
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -329,6 +482,8 @@ class ChatScreenState extends State<ChatScreen> {
                   Expanded(
                     child: TextField(
                       controller: _textCtrl,
+                      minLines: 1,
+                      maxLines: 6,
                       decoration: const InputDecoration(
                         hintText: 'Message...',
                         contentPadding: EdgeInsets.symmetric(
@@ -387,7 +542,6 @@ class _SwipeableMessageState extends State<_SwipeableMessage> {
     return GestureDetector(
       onHorizontalDragUpdate: (d) {
         final delta = d.delta.dx;
-        // Only allow right swipe (positive direction)
         if (delta > 0) {
           setState(() {
             _offset = (_offset + delta).clamp(0.0, 72.0);
@@ -438,6 +592,7 @@ class _MessageBubble extends StatelessWidget {
   final String myUid;
   final VoidCallback onLongPress;
   final void Function(String emoji) onReaction;
+  final VoidCallback? onReplyTap;
   final String searchQuery;
 
   const _MessageBubble({
@@ -447,14 +602,14 @@ class _MessageBubble extends StatelessWidget {
     required this.myUid,
     required this.onLongPress,
     required this.onReaction,
+    this.onReplyTap,
     this.searchQuery = '',
   });
 
   Widget _buildMessageText(String text, bool isMe) {
     final baseColor = isMe ? Colors.white : AppTheme.textDark;
     if (searchQuery.isEmpty) {
-      return Text(text,
-          style: TextStyle(color: baseColor, fontSize: 15));
+      return Text(text, style: TextStyle(color: baseColor, fontSize: 15));
     }
     final lower = text.toLowerCase();
     final queryLower = searchQuery.toLowerCase();
@@ -525,8 +680,7 @@ class _MessageBubble extends StatelessWidget {
                   onLongPress: onLongPress,
                   child: Container(
                     constraints: BoxConstraints(
-                        maxWidth:
-                            MediaQuery.of(context).size.width * 0.72),
+                        maxWidth: MediaQuery.of(context).size.width * 0.72),
                     padding: const EdgeInsets.symmetric(
                         horizontal: 14, vertical: 10),
                     decoration: BoxDecoration(
@@ -537,42 +691,44 @@ class _MessageBubble extends StatelessWidget {
                         bottomLeft: Radius.circular(isMe ? 18 : 4),
                         bottomRight: Radius.circular(isMe ? 4 : 18),
                       ),
-                      border: isMe
-                          ? null
-                          : Border.all(color: AppTheme.divider),
+                      border:
+                          isMe ? null : Border.all(color: AppTheme.divider),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Reply preview
+                        // Reply preview — tappable to scroll to original
                         if (message.replyToText != null)
-                          Container(
-                            margin: const EdgeInsets.only(bottom: 6),
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: isMe
-                                  ? Colors.white.withValues(alpha: 0.2)
-                                  : AppTheme.primaryLight,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border(
-                                left: BorderSide(
-                                  color: isMe
-                                      ? Colors.white
-                                      : AppTheme.primary,
-                                  width: 3,
+                          GestureDetector(
+                            onTap: onReplyTap,
+                            child: Container(
+                              margin: const EdgeInsets.only(bottom: 6),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: isMe
+                                    ? Colors.white.withValues(alpha: 0.2)
+                                    : AppTheme.primaryLight,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border(
+                                  left: BorderSide(
+                                    color: isMe
+                                        ? Colors.white
+                                        : AppTheme.primary,
+                                    width: 3,
+                                  ),
                                 ),
                               ),
-                            ),
-                            child: Text(
-                              message.replyToText!,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: isMe
-                                    ? Colors.white70
-                                    : AppTheme.textMuted,
+                              child: Text(
+                                message.replyToText!,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: isMe
+                                      ? Colors.white70
+                                      : AppTheme.textMuted,
+                                ),
                               ),
                             ),
                           ),
@@ -630,9 +786,8 @@ class _MessageBubble extends StatelessWidget {
                             ? Icons.done_all_rounded
                             : Icons.done_rounded,
                         size: 14,
-                        color: isRead
-                            ? AppTheme.primary
-                            : AppTheme.textMuted,
+                        color:
+                            isRead ? AppTheme.primary : AppTheme.textMuted,
                       ),
                       if (isRead && partnerReadTime != null) ...[
                         const SizedBox(width: 4),
