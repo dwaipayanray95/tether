@@ -157,13 +157,15 @@ class _CallScreenState extends State<CallScreen> {
     final offerMap = Map<String, dynamic>.from(data['offer']);
     final offer = RTCSessionDescription(offerMap['sdp'], offerMap['type']);
 
-    // 2. Set remote description (the offer)
-    await _webrtc.setRemoteDescription(offer);
-
-    // 3. Forward callee candidates as they gather
+    // 2. Attach ICE listener BEFORE setRemoteDescription — gathering can start
+    //    immediately after SDP is set; attaching after risks missing early candidates
+    //    on the broadcast stream.
     _webrtc.onIceCandidate.listen((c) {
       CallService.sendCalleeCandidate(_callId!, c);
     });
+
+    // 3. Set remote description (the offer)
+    await _webrtc.setRemoteDescription(offer);
 
     // 4. Create and send the answer
     final answer = await _webrtc.createAnswer();
@@ -203,6 +205,7 @@ class _CallScreenState extends State<CallScreen> {
 
   void _toggleSpeaker() {
     setState(() => _speakerOn = !_speakerOn);
+    _webrtc.setSpeakerOn(_speakerOn);
     HapticFeedback.lightImpact();
   }
 

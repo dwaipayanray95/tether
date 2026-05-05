@@ -9,7 +9,17 @@ class WebRtcService {
     'iceServers': [
       {'urls': 'stun:stun.l.google.com:19302'},
       {'urls': 'stun:stun1.l.google.com:19302'},
-    ]
+      // TURN relay — handles symmetric NAT where STUN alone fails
+      {
+        'urls': [
+          'turn:openrelay.metered.ca:80',
+          'turn:openrelay.metered.ca:443',
+          'turn:openrelay.metered.ca:443?transport=tcp',
+        ],
+        'username': 'openrelayproject',
+        'credential': 'openrelayproject',
+      },
+    ],
   };
 
   RTCPeerConnection? _pc;
@@ -52,6 +62,14 @@ class WebRtcService {
         }
       }
     };
+
+    // Handle incoming remote tracks — required for audio to be activated
+    _pc!.onTrack = (RTCTrackEvent event) {
+      LogService.log('Remote track received: ${event.track.kind}');
+    };
+
+    // Default to earpiece (standard phone-call behaviour)
+    await Helper.setSpeakerphoneOn(false);
 
     // Capture microphone audio
     LogService.log('Requesting microphone access');
@@ -104,6 +122,13 @@ class WebRtcService {
     }
     LogService.log('Adding Remote ICE candidate');
     await _pc!.addCandidate(candidate);
+  }
+
+  // ── Audio routing ─────────────────────────────────────────────────────────
+
+  Future<void> setSpeakerOn(bool on) async {
+    LogService.log('Speaker ${on ? 'ON' : 'OFF (earpiece)'}');
+    await Helper.setSpeakerphoneOn(on);
   }
 
   // ── Mute ──────────────────────────────────────────────────────────────────
