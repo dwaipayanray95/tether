@@ -144,6 +144,36 @@ class FirestoreService {
             snap.docs.map((d) => Message.fromMap(d.id, d.data())).toList());
   }
 
+  /// One page of messages ordered newest-first.
+  /// Returns the messages and a cursor for the next page.
+  Future<({List<Message> messages, DocumentSnapshot? cursor})>
+      fetchMessagePage(String coupleId, int limit,
+          {DocumentSnapshot? startAfter}) async {
+    Query<Map<String, dynamic>> q = _db
+        .collection('couples')
+        .doc(coupleId)
+        .collection('messages')
+        .orderBy('sentAt', descending: true)
+        .limit(limit);
+    if (startAfter != null) q = q.startAfterDocument(startAfter);
+    final snap = await q.get();
+    final messages =
+        snap.docs.map((d) => Message.fromMap(d.id, d.data())).toList();
+    final cursor = snap.docs.isNotEmpty ? snap.docs.last : null;
+    return (messages: messages, cursor: cursor);
+  }
+
+  /// All messages — used for full-history search.
+  Future<List<Message>> getAllMessages(String coupleId) async {
+    final snap = await _db
+        .collection('couples')
+        .doc(coupleId)
+        .collection('messages')
+        .orderBy('sentAt', descending: true)
+        .get();
+    return snap.docs.map((d) => Message.fromMap(d.id, d.data())).toList();
+  }
+
   Future<void> sendMessage(String coupleId, Message message,
       {String senderName = ''}) async {
     await _db
