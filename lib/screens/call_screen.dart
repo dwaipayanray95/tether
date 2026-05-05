@@ -3,21 +3,30 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
 import '../services/auth_service.dart';
 import '../services/call_service.dart';
 import '../services/webrtc_service.dart';
+import '../services/log_service.dart';
 import '../theme/app_theme.dart';
 
-enum _CallState { connecting, ringing, active, ended }
+enum _CallState {
+  connecting,    // outgoing: setting up WebRTC
+  ringing,       // outgoing: waiting for partner to answer
+  incomingRing,  // incoming: showing accept/decline to THIS user
+  active,
+  ended,
+}
 
 /// Full-screen voice call UI.
 ///
-/// Pass [callId] when answering an incoming call.
-/// Omit [callId] (leave null) to start an outgoing call.
+/// [isOutgoing] = true  → we placed the call.
+/// [isOutgoing] = false → partner called us; show ringing UI first.
+/// [callId] is required for incoming calls; may be null for outgoing.
 class CallScreen extends StatefulWidget {
   final bool isOutgoing;
   final String partnerName;
-  final String? callId; // null → outgoing; non-null → incoming
+  final String? callId;
 
   const CallScreen({
     super.key,
@@ -33,6 +42,7 @@ class CallScreen extends StatefulWidget {
 class _CallScreenState extends State<CallScreen> {
   final _auth = AuthService();
   final _webrtc = WebRtcService();
+  final _ringtone = FlutterRingtonePlayer();
 
   _CallState _state = _CallState.connecting;
   bool _muted = false;
@@ -40,6 +50,7 @@ class _CallScreenState extends State<CallScreen> {
   String? _callId;
   Timer? _durationTimer;
   int _seconds = 0;
+  bool _ringtoneActive = false;
 
   StreamSubscription? _disconnectedSub;
 
@@ -53,9 +64,34 @@ class _CallScreenState extends State<CallScreen> {
   void dispose() {
     _durationTimer?.cancel();
     _disconnectedSub?.cancel();
+    _stopRingtone();
     _webrtc.dispose();
     super.dispose();
   }
+
+  // ── Ringtone ──────────────────────────────────────────────────────────────
+
+  void _startRingtone() {
+    if (_ringtoneActive) return;
+    _ringtoneActive = true;
+    LogService.log('Starting ringtone');
+    _ringtone.play(
+      android: AndroidSounds.ringtone,
+      ios: IosSounds.electronic,
+      looping: true,
+      volume: 1.0,
+      asAlarm: false,
+    );
+  }
+
+  void _stopRingtone() {
+    if (!_ringtoneActive) return;
+    _ringtoneActive = false;
+    LogService.log('Stopping ringtone');
+    _ringtone.stop();
+  }
+
+  // ── Start ─────────────────────────────────────────────────────────────────
 
   Future<void> _start() async {
     await _webrtc.init();
@@ -67,7 +103,9 @@ class _CallScreenState extends State<CallScreen> {
     if (widget.isOutgoing) {
       await _startOutgoing();
     } else {
-      await _answerIncoming();
+      // Show ringing UI — wait for user to tap Accept/Decline
+      setState(() => _state = _CallState.incomingRing);
+      _startRingtone();
     }
   }
 
@@ -96,7 +134,14 @@ class _CallScreenState extends State<CallScreen> {
     });
   }
 
-  // ── Incoming ──────────────────────────────────────────────────────────────
+  // ── Incoming: Accept ──────────────────────────────────────────────────────
+
+  Future<void> _acceptCall() async {
+    _stopRingtone();
+    HapticFeedback.mediumImpact();
+    setState(() => _state = _CallState.connecting);
+    await _answerIncoming();
+  }
 
   Future<void> _answerIncoming() async {
     _callId = widget.callId!;
@@ -158,8 +203,6 @@ class _CallScreenState extends State<CallScreen> {
 
   void _toggleSpeaker() {
     setState(() => _speakerOn = !_speakerOn);
-    // flutter_webrtc handles speaker routing via selectAudioOutput if needed;
-    // for most Android devices the earpiece/speaker toggle happens automatically.
     HapticFeedback.lightImpact();
   }
 
@@ -168,8 +211,10 @@ class _CallScreenState extends State<CallScreen> {
     setState(() => _state = _CallState.ended);
     _durationTimer?.cancel();
     _disconnectedSub?.cancel(); // Cancel before dispose to prevent re-trigger
-    if (_callId != null && !remote) {
-      await CallService.endCall(_callId!);
+    _stopRingtone();
+    final idToEnd = _callId ?? widget.callId;
+    if (idToEnd != null && !remote) {
+      await CallService.endCall(idToEnd);
     }
     await _webrtc.dispose();
     if (mounted) Navigator.of(context).pop();
@@ -217,41 +262,72 @@ class _CallScreenState extends State<CallScreen> {
             Text(
               _statusLabel,
               style: TextStyle(
-                  fontSize: 15,
-                  color: Colors.white.withValues(alpha: 0.6)),
+                  fontSize: 15, color: Colors.white.withValues(alpha: 0.6)),
             ),
             const Spacer(),
             // Controls
-            Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 40, vertical: 32),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  _ControlButton(
-                    icon: _muted ? Icons.mic_off : Icons.mic,
-                    label: _muted ? 'Unmute' : 'Mute',
-                    onTap: _state == _CallState.active ? _toggleMute : null,
-                    active: _muted,
-                  ),
-                  // Hang up
-                  _ControlButton(
-                    icon: Icons.call_end_rounded,
-                    label: 'End',
-                    onTap: () => _hangUp(),
-                    isHangup: true,
-                  ),
-                  _ControlButton(
-                    icon: _speakerOn ? Icons.volume_up : Icons.volume_down,
-                    label: _speakerOn ? 'Speaker' : 'Earpiece',
-                    onTap: _state == _CallState.active ? _toggleSpeaker : null,
-                    active: _speakerOn,
-                  ),
-                ],
-              ),
-            ),
+            _state == _CallState.incomingRing
+                ? _buildIncomingControls()
+                : _buildActiveControls(),
+            const SizedBox(height: 32),
           ],
         ),
+      ),
+    );
+  }
+
+  /// Accept / Decline buttons shown while the incoming call is ringing.
+  Widget _buildIncomingControls() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 40),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          // Decline
+          _ControlButton(
+            icon: Icons.call_end_rounded,
+            label: 'Decline',
+            onTap: () => _hangUp(),
+            isHangup: true,
+          ),
+          // Accept
+          _ControlButton(
+            icon: Icons.call_rounded,
+            label: 'Accept',
+            onTap: _acceptCall,
+            isAccept: true,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Mute / End / Speaker controls shown during an active call.
+  Widget _buildActiveControls() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 40),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          _ControlButton(
+            icon: _muted ? Icons.mic_off : Icons.mic,
+            label: _muted ? 'Unmute' : 'Mute',
+            onTap: _state == _CallState.active ? _toggleMute : null,
+            active: _muted,
+          ),
+          _ControlButton(
+            icon: Icons.call_end_rounded,
+            label: 'End',
+            onTap: () => _hangUp(),
+            isHangup: true,
+          ),
+          _ControlButton(
+            icon: _speakerOn ? Icons.volume_up : Icons.volume_down,
+            label: _speakerOn ? 'Speaker' : 'Earpiece',
+            onTap: _state == _CallState.active ? _toggleSpeaker : null,
+            active: _speakerOn,
+          ),
+        ],
       ),
     );
   }
@@ -262,6 +338,8 @@ class _CallScreenState extends State<CallScreen> {
         return 'Connecting…';
       case _CallState.ringing:
         return 'Ringing…';
+      case _CallState.incomingRing:
+        return 'Incoming call';
       case _CallState.active:
         return _durationLabel;
       case _CallState.ended:
@@ -278,6 +356,7 @@ class _ControlButton extends StatelessWidget {
   final VoidCallback? onTap;
   final bool active;
   final bool isHangup;
+  final bool isAccept;
 
   const _ControlButton({
     required this.icon,
@@ -285,39 +364,41 @@ class _ControlButton extends StatelessWidget {
     required this.onTap,
     this.active = false,
     this.isHangup = false,
+    this.isAccept = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final bgColor = isHangup
         ? Colors.red
-        : active
-            ? AppTheme.primary
-            : Colors.white.withValues(alpha: 0.15);
+        : isAccept
+            ? Colors.green
+            : active
+                ? AppTheme.primary
+                : Colors.white.withValues(alpha: 0.15);
     final iconColor =
-        (isHangup || active) ? Colors.white : Colors.white.withValues(alpha: 0.8);
+        (isHangup || isAccept || active) ? Colors.white : Colors.white.withValues(alpha: 0.8);
 
     return GestureDetector(
       onTap: onTap,
       child: Column(
         children: [
           Container(
-            width: 64,
-            height: 64,
+            width: 72,
+            height: 72,
             decoration: BoxDecoration(
               color: onTap == null
                   ? Colors.white.withValues(alpha: 0.08)
                   : bgColor,
               shape: BoxShape.circle,
             ),
-            child: Icon(icon, color: iconColor, size: 28),
+            child: Icon(icon, color: iconColor, size: 32),
           ),
           const SizedBox(height: 8),
           Text(
             label,
             style: TextStyle(
-                fontSize: 12,
-                color: Colors.white.withValues(alpha: 0.6)),
+                fontSize: 13, color: Colors.white.withValues(alpha: 0.7)),
           ),
         ],
       ),
