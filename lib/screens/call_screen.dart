@@ -2,28 +2,22 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
 import '../services/auth_service.dart';
 import '../services/call_service.dart';
-import '../services/webrtc_service.dart';
+import '../services/audio_relay_service.dart';
 import '../services/proximity_service.dart';
 import '../services/log_service.dart';
 import '../theme/app_theme.dart';
 
 enum _CallState {
-  connecting,    // outgoing: setting up WebRTC
+  connecting,    // initial state
   ringing,       // outgoing: waiting for partner to answer
   incomingRing,  // incoming: showing accept/decline to THIS user
   active,
   ended,
 }
 
-/// Full-screen voice call UI.
-///
-/// [isOutgoing] = true  → we placed the call.
-/// [isOutgoing] = false → partner called us; show ringing UI first.
-/// [callId] is required for incoming calls; may be null for outgoing.
 class CallScreen extends StatefulWidget {
   final bool isOutgoing;
   final String partnerName;
@@ -42,7 +36,7 @@ class CallScreen extends StatefulWidget {
 
 class _CallScreenState extends State<CallScreen> {
   final _auth = AuthService();
-  final _webrtc = WebRtcService();
+  final _relay = AudioRelayService();
   final _ringtone = FlutterRingtonePlayer();
 
   _CallState _state = _CallState.connecting;
@@ -53,22 +47,22 @@ class _CallScreenState extends State<CallScreen> {
   int _seconds = 0;
   bool _ringtoneActive = false;
 
-  StreamSubscription? _disconnectedSub;
+  StreamSubscription? _callStatusSub;
 
   @override
   void initState() {
     super.initState();
-    ProximityService.acquire(); // dim screen when held to ear
+    ProximityService.acquire();
     _start();
   }
 
   @override
   void dispose() {
     _durationTimer?.cancel();
-    _disconnectedSub?.cancel();
+    _callStatusSub?.cancel();
     _stopRingtone();
     ProximityService.release();
-    _webrtc.dispose();
+    _relay.stop();
     super.dispose();
   }
 
@@ -97,94 +91,50 @@ class _CallScreenState extends State<CallScreen> {
   // ── Start ─────────────────────────────────────────────────────────────────
 
   Future<void> _start() async {
-    await _webrtc.init();
-
-    _disconnectedSub = _webrtc.onDisconnected.listen((_) {
-      if (mounted && _state != _CallState.ended) _hangUp(remote: true);
-    });
-
     if (widget.isOutgoing) {
-      await _startOutgoing();
+      setState(() => _state = _CallState.ringing);
+      _callId = await CallService.startCall(callerName: _auth.myName);
+      _watchCallStatus(_callId!);
     } else {
-      // Show ringing UI — wait for user to tap Accept/Decline
+      _callId = widget.callId;
+      if (_callId != null) {
+        _watchCallStatus(_callId!);
+      }
       setState(() => _state = _CallState.incomingRing);
       _startRingtone();
     }
   }
 
-  // ── Outgoing ──────────────────────────────────────────────────────────────
-
-  Future<void> _startOutgoing() async {
-    setState(() => _state = _CallState.ringing);
-    final offer = await _webrtc.createOffer();
-
-    _callId = await CallService.startCall(
-      callerName: _auth.myName,
-      offer: offer,
-      onAnswer: (answer) async {
-        await _webrtc.setRemoteDescription(answer);
-        if (mounted) {
-          setState(() => _state = _CallState.active);
-          _startTimer();
-        }
-      },
-      onRemoteCandidate: (c) => _webrtc.addIceCandidate(c),
-    );
-
-    // Forward our ICE candidates to Firestore
-    _webrtc.onIceCandidate.listen((c) {
-      if (_callId != null) CallService.sendCallerCandidate(_callId!, c);
+  void _watchCallStatus(String callId) {
+    _callStatusSub = CallService.callStatusStream(callId).listen((status) async {
+      LogService.log('Call status update: $status');
+      if (status == 'active' && _state != _CallState.active) {
+        _stopRingtone();
+        setState(() => _state = _CallState.active);
+        _startTimer();
+        await _relay.start(
+          callId,
+          _auth.myName.toLowerCase(),
+          widget.partnerName.toLowerCase(),
+        );
+      } else if ((status == 'ended' || status == null) &&
+          mounted &&
+          _state != _CallState.ended) {
+        LogService.log('Call $callId ended remotely');
+        _hangUp(remote: true);
+      }
     });
   }
 
-  // ── Incoming: Accept ──────────────────────────────────────────────────────
+  // ── Actions ───────────────────────────────────────────────────────────────
 
   Future<void> _acceptCall() async {
     _stopRingtone();
     HapticFeedback.mediumImpact();
-    setState(() => _state = _CallState.connecting);
-    await _answerIncoming();
-  }
-
-  Future<void> _answerIncoming() async {
-    _callId = widget.callId!;
-
-    // 1. Fetch the offer from Firestore
-    final doc = await CallService.getCall(_callId!);
-    final data = doc.data();
-    if (data == null || data['offer'] == null) {
-      _hangUp();
-      return;
-    }
-
-    final offerMap = Map<String, dynamic>.from(data['offer']);
-    final offer = RTCSessionDescription(offerMap['sdp'], offerMap['type']);
-
-    // 2. Attach ICE listener BEFORE setRemoteDescription — gathering can start
-    //    immediately after SDP is set; attaching after risks missing early candidates
-    //    on the broadcast stream.
-    _webrtc.onIceCandidate.listen((c) {
-      CallService.sendCalleeCandidate(_callId!, c);
-    });
-
-    // 3. Set remote description (the offer)
-    await _webrtc.setRemoteDescription(offer);
-
-    // 4. Create and send the answer
-    final answer = await _webrtc.createAnswer();
-    await CallService.answerCall(
-      callId: _callId!,
-      answer: answer,
-      onRemoteCandidate: (c) => _webrtc.addIceCandidate(c),
-    );
-
-    if (mounted) {
-      setState(() => _state = _CallState.active);
-      _startTimer();
+    if (_callId != null) {
+      await CallService.acceptCall(_callId!);
     }
   }
-
-  // ── Timer ─────────────────────────────────────────────────────────────────
 
   void _startTimer() {
     _durationTimer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -198,17 +148,15 @@ class _CallScreenState extends State<CallScreen> {
     return '$m:$s';
   }
 
-  // ── Actions ───────────────────────────────────────────────────────────────
-
   void _toggleMute() {
     setState(() => _muted = !_muted);
-    _webrtc.setMuted(_muted);
+    _relay.setMuted(_muted);
     HapticFeedback.lightImpact();
   }
 
   void _toggleSpeaker() {
     setState(() => _speakerOn = !_speakerOn);
-    _webrtc.setSpeakerOn(_speakerOn);
+    _relay.setSpeakerOn(_speakerOn);
     HapticFeedback.lightImpact();
   }
 
@@ -216,13 +164,16 @@ class _CallScreenState extends State<CallScreen> {
     if (_state == _CallState.ended) return;
     setState(() => _state = _CallState.ended);
     _durationTimer?.cancel();
-    _disconnectedSub?.cancel(); // Cancel before dispose to prevent re-trigger
+    _callStatusSub?.cancel();
     _stopRingtone();
+    
     final idToEnd = _callId ?? widget.callId;
     if (idToEnd != null && !remote) {
       await CallService.endCall(idToEnd);
     }
-    await _webrtc.dispose();
+    
+    await _relay.stop();
+    
     if (mounted) Navigator.of(context).pop();
   }
 
@@ -236,7 +187,6 @@ class _CallScreenState extends State<CallScreen> {
         child: Column(
           children: [
             const Spacer(),
-            // Avatar
             Container(
               width: 100,
               height: 100,
@@ -271,7 +221,6 @@ class _CallScreenState extends State<CallScreen> {
                   fontSize: 15, color: Colors.white.withValues(alpha: 0.6)),
             ),
             const Spacer(),
-            // Controls
             _state == _CallState.incomingRing
                 ? _buildIncomingControls()
                 : _buildActiveControls(),
@@ -282,21 +231,18 @@ class _CallScreenState extends State<CallScreen> {
     );
   }
 
-  /// Accept / Decline buttons shown while the incoming call is ringing.
   Widget _buildIncomingControls() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 40),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
-          // Decline
           _ControlButton(
             icon: Icons.call_end_rounded,
             label: 'Decline',
             onTap: () => _hangUp(),
             isHangup: true,
           ),
-          // Accept
           _ControlButton(
             icon: Icons.call_rounded,
             label: 'Accept',
@@ -308,7 +254,6 @@ class _CallScreenState extends State<CallScreen> {
     );
   }
 
-  /// Mute / End / Speaker controls shown during an active call.
   Widget _buildActiveControls() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 40),
@@ -353,8 +298,6 @@ class _CallScreenState extends State<CallScreen> {
     }
   }
 }
-
-// ── Control button ────────────────────────────────────────────────────────────
 
 class _ControlButton extends StatelessWidget {
   final IconData icon;

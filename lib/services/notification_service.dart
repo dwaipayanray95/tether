@@ -107,7 +107,6 @@ class NotificationService {
   // ── Pending navigation set before MainShell reads them ───────────────────
   static int? pendingTab;
   static String? pendingCallId;
-  static String? lastHandledCallId; // to prevent double-trigger in MainShell
 
   // ── init ─────────────────────────────────────────────────────────────────
 
@@ -216,7 +215,6 @@ class NotificationService {
         final callId = data['callId'] as String?;
         if (callId != null) {
           pendingCallId = callId;
-          lastHandledCallId = callId;
         }
       }
     } catch (e) {

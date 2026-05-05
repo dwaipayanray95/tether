@@ -6,6 +6,7 @@ import '../models/todo_model.dart';
 import '../models/comment_model.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
+import '../services/log_service.dart';
 import '../theme/app_theme.dart';
 
 class TodoScreen extends StatefulWidget {
@@ -78,6 +79,7 @@ class _TodoScreenState extends State<TodoScreen> {
     final title = _titleCtrl.text.trim();
     if (title.isEmpty) return;
     final details = _detailsCtrl.text.trim();
+    LogService.log('Adding new to-do: $title');
     Navigator.pop(context);
     await _firestore.addTodo(
       _coupleId,
@@ -93,6 +95,7 @@ class _TodoScreenState extends State<TodoScreen> {
   }
 
   void _openDetail(TodoItem todo) {
+    LogService.log('Opening to-do details: ${todo.title}');
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
