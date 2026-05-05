@@ -9,14 +9,13 @@ class FirestoreService {
 
   // ── Poke ──────────────────────────────────────────────────────────────────
 
-  Future<void> sendPoke(String fromUid, String toUid, String fromName) async {
-    await _db.collection('pokes').add({
-      'from': fromUid,
-      'to': toUid,
+  Future<void> sendPoke(String coupleId, String fromUid, String fromName) async {
+    await _db.doc('couples/$coupleId/pokes/status').set({
+      'lastFrom': fromUid,
       'fromName': fromName,
-      'sentAt': DateTime.now().toIso8601String(),
+      'sentAt': FieldValue.serverTimestamp(),
     });
-    final partnerName = fromName == 'Ray' ? 'aproo' : 'ray';
+    final partnerName = fromName == 'Raayyy' ? 'aproo' : 'raayyy';
     FcmService.send(
       partnerName: partnerName,
       title: '💕 $fromName poked you!',
@@ -25,13 +24,8 @@ class FirestoreService {
     );
   }
 
-  Stream<QuerySnapshot> pokeStream(String toUid) {
-    return _db
-        .collection('pokes')
-        .where('to', isEqualTo: toUid)
-        .orderBy('sentAt', descending: true)
-        .limit(1)
-        .snapshots();
+  Stream<DocumentSnapshot<Map<String, dynamic>>> pokeStatusStream(String coupleId) {
+    return _db.doc('couples/$coupleId/pokes/status').snapshots();
   }
 
   // ── To-do list ────────────────────────────────────────────────────────────
@@ -53,7 +47,7 @@ class FirestoreService {
         .doc(coupleId)
         .collection('todos')
         .add(todo.toMap());
-    final partnerName = todo.createdBy == 'Ray' ? 'aproo' : 'ray';
+    final partnerName = todo.createdBy == 'Raayyy' ? 'aproo' : 'raayyy';
     FcmService.send(
       partnerName: partnerName,
       title: '✅ New task added',
@@ -115,7 +109,7 @@ class FirestoreService {
         .doc(todoId)
         .collection('comments')
         .add(comment.toMap());
-    final partnerName = comment.authorName == 'Ray' ? 'aproo' : 'ray';
+    final partnerName = comment.authorName == 'Raayyy' ? 'aproo' : 'raayyy';
     FcmService.send(
       partnerName: partnerName,
       title: '🗨️ ${comment.authorName} commented',
@@ -158,7 +152,7 @@ class FirestoreService {
         .collection('messages')
         .add(message.toMap());
     if (senderName.isNotEmpty) {
-      final partnerName = senderName == 'Ray' ? 'aproo' : 'ray';
+      final partnerName = senderName == 'Raayyy' ? 'aproo' : 'raayyy';
       final preview = message.text.length > 60
           ? '${message.text.substring(0, 60)}…'
           : message.text;
@@ -184,7 +178,8 @@ class FirestoreService {
       final readBy = List<String>.from(doc.data()['readBy'] as List? ?? []);
       if (!readBy.contains(myUid)) {
         batch.update(doc.reference, {
-          'readBy': FieldValue.arrayUnion([myUid])
+          'readBy': FieldValue.arrayUnion([myUid]),
+          'readTimes.$myUid': DateTime.now().toIso8601String(),
         });
       }
     }
@@ -234,7 +229,7 @@ class FirestoreService {
   // ── Presence / last seen ─────────────────────────────────────────────────
 
   Future<void> updatePresence(String myKey, {bool isOnline = true}) async {
-    await _db.doc('couples/ray-aproo/presence/$myKey').set({
+    await _db.doc('couples/raayyy-aproo/presence/$myKey').set({
       'lastSeen': FieldValue.serverTimestamp(),
       'isOnline': isOnline,
     }, SetOptions(merge: true));
@@ -242,7 +237,7 @@ class FirestoreService {
 
   Stream<DocumentSnapshot<Map<String, dynamic>>> presenceStream(String key) {
     return _db
-        .doc('couples/ray-aproo/presence/$key')
+        .doc('couples/raayyy-aproo/presence/$key')
         .snapshots();
   }
 

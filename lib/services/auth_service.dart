@@ -4,11 +4,11 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 // Only these two emails are allowed in
 const List<String> allowedEmails = [
-  'ray@redacted.invalid', // Ray
+  'ray@redacted.invalid', // Raayyy
   'aproo@redacted.invalid',      // Aproo
 ];
 
-const String coupleId = 'ray-aproo'; // shared ID for Firestore collections
+const String coupleId = 'raayyy-aproo'; // shared ID for Firestore collections
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -18,11 +18,11 @@ class AuthService {
   User? get currentUser => _auth.currentUser;
   Stream<User?> get authStateChanges => _auth.authStateChanges();
 
-  bool get isRay =>
+  bool get isRaayyy =>
       currentUser?.email?.toLowerCase() == allowedEmails[0].toLowerCase();
 
-  String get myName => isRay ? 'Ray' : 'Aproo';
-  String get partnerName => isRay ? 'Aproo' : 'Ray';
+  String get myName => isRaayyy ? 'Raayyy' : 'Aproo';
+  String get partnerName => isRaayyy ? 'Aproo' : 'Raayyy';
 
   // ── Google Sign-In ────────────────────────────────────────────────────────
 
@@ -83,7 +83,7 @@ class AuthService {
     if (!doc.exists) {
       final resolvedName = name ??
           (user.email?.toLowerCase() == allowedEmails[0].toLowerCase()
-              ? 'Ray'
+              ? 'Raayyy'
               : 'Aproo');
       await ref.set({
         'uid': user.uid,

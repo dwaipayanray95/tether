@@ -1,6 +1,6 @@
 # tether
 
-Tether - Ray & Aproo
+Tether - Raayyy & Aproo
 
 ## Getting Started
 

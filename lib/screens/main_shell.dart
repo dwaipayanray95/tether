@@ -18,11 +18,12 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   int _currentIndex = 0;
+  final _chatKey = GlobalKey<ChatScreenState>();
   final _firestore = FirestoreService();
   final _auth = AuthService();
-  static const _coupleId = 'ray-aproo';
+  static const _coupleId = 'raayyy-aproo';
   String get _myUid => FirebaseAuth.instance.currentUser?.uid ?? '';
-  String get _myPresenceKey => _auth.isRay ? 'ray' : 'aproo';
+  String get _myPresenceKey => _auth.isRaayyy ? 'raayyy' : 'aproo';
 
   void _goToTab(int index) => setState(() => _currentIndex = index);
 
@@ -79,14 +80,21 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
 
     final screens = [
       HomeScreen(onNavigate: _goToTab),
-      const ChatScreen(),
+      ChatScreen(key: _chatKey),
       const TodoScreen(),
     ];
 
     return PopScope(
-      canPop: _currentIndex == 0,
+      canPop: _currentIndex == 0 &&
+          !(_currentIndex == 1 && _chatKey.currentState?.isSearchActive == true),
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) setState(() => _currentIndex = 0);
+        if (didPop) return;
+        
+        if (_currentIndex == 1 && _chatKey.currentState?.isSearchActive == true) {
+          _chatKey.currentState?.closeSearch();
+        } else {
+          setState(() => _currentIndex = 0);
+        }
       },
       child: Scaffold(
         body: IndexedStack(

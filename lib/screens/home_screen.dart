@@ -9,7 +9,7 @@ import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
 import '../services/location_service.dart';
 import '../theme/app_theme.dart';
-import 'search_screen.dart';
+import 'settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final void Function(int) onNavigate;
@@ -26,24 +26,25 @@ class _HomeScreenState extends State<HomeScreen>
   final _firestore = FirestoreService();
   late AnimationController _pokeController;
   late Animation<double> _pokeScale;
-  bool _pokeSent = false;
-
-  // Together since date
-  static final DateTime _togetherSince = DateTime(2026, 4, 9);
+  
+  // Poke status
+  String? _lastPokeFrom;
+  StreamSubscription? _pokeSub;
 
   // Distance
   Position? _myPosition;
   Map<String, dynamic>? _partnerLocation;
   bool _locationLoading = true;
+  bool _isRefreshing = false;
 
   // Last seen
-  Timestamp? _rayLastSeen;
-  bool _rayIsOnline = false;
+  Timestamp? _raayyyLastSeen;
+  bool _raayyyIsOnline = false;
   Timestamp? _aprooLastSeen;
   bool _aprooIsOnline = false;
 
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _partnerLocSub;
-  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _rayPresenceSub;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _raayyyPresenceSub;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _aprooPresenceSub;
 
   double? get _distanceKm {
@@ -67,17 +68,32 @@ class _HomeScreenState extends State<HomeScreen>
     _pokeScale = Tween<double>(begin: 1.0, end: 0.88).animate(
       CurvedAnimation(parent: _pokeController, curve: Curves.easeInOut),
     );
-    _initLocation();
+    
+    // Trigger location permission after the screen loads so the user sees the UI first
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initLocation();
+    });
+    
     _initPresence();
+    _initPoke();
   }
 
   @override
   void dispose() {
     _pokeController.dispose();
     _partnerLocSub?.cancel();
-    _rayPresenceSub?.cancel();
+    _raayyyPresenceSub?.cancel();
     _aprooPresenceSub?.cancel();
+    _pokeSub?.cancel();
     super.dispose();
+  }
+
+  void _initPoke() {
+    _pokeSub = _firestore.pokeStatusStream(coupleId).listen((snap) {
+      if (mounted && snap.exists) {
+        setState(() => _lastPokeFrom = snap.data()?['lastFrom']);
+      }
+    });
   }
 
   Future<void> _initLocation() async {
@@ -87,8 +103,17 @@ class _HomeScreenState extends State<HomeScreen>
       return;
     }
 
-    final myKey = _auth.isRay ? 'ray' : 'aproo';
-    final partnerKey = _auth.isRay ? 'aproo' : 'ray';
+    final myKey = _auth.isRaayyy ? 'raayyy' : 'aproo';
+    final partnerKey = _auth.isRaayyy ? 'aproo' : 'raayyy';
+
+    // Fetch initial state first so we don't show empty state
+    final initialPartner = await LocationService.getLocation(partnerKey);
+    if (mounted) {
+      setState(() {
+        _partnerLocation = initialPartner;
+        if (initialPartner != null) _locationLoading = false;
+      });
+    }
 
     final myPos = await LocationService.getCurrentPosition();
     if (myPos != null && mounted) {
@@ -101,18 +126,40 @@ class _HomeScreenState extends State<HomeScreen>
         setState(() {
           _partnerLocation = snap.data();
           _locationLoading = false;
+          _isRefreshing = false;
         });
       }
     });
   }
 
+  Future<void> _forceRefresh() async {
+    if (_isRefreshing) return;
+    HapticFeedback.mediumImpact();
+    setState(() => _isRefreshing = true);
+
+    final myKey = _auth.isRaayyy ? 'raayyy' : 'aproo';
+    final myPos = await LocationService.getCurrentPosition();
+    if (myPos != null) {
+      await LocationService.forceUpload(myPos, myKey, _auth.myName);
+    }
+
+    await LocationService.pingPartner(_auth.myName);
+
+    // Timeout after 15s if no update received
+    Future.delayed(const Duration(seconds: 15), () {
+      if (mounted && _isRefreshing) {
+        setState(() => _isRefreshing = false);
+      }
+    });
+  }
+
   void _initPresence() {
-    _rayPresenceSub = _firestore.presenceStream('ray').listen((snap) {
+    _raayyyPresenceSub = _firestore.presenceStream('raayyy').listen((snap) {
       final data = snap.data();
       if (mounted) {
         setState(() {
-          _rayLastSeen = data?['lastSeen'] as Timestamp?;
-          _rayIsOnline = data?['isOnline'] as bool? ?? false;
+          _raayyyLastSeen = data?['lastSeen'] as Timestamp?;
+          _raayyyIsOnline = data?['isOnline'] as bool? ?? false;
         });
       }
     });
@@ -128,18 +175,14 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _sendPoke() async {
+    final myUid = _auth.currentUser!.uid;
+    if (_lastPokeFrom == myUid) return;
+
     await _pokeController.forward();
     await _pokeController.reverse();
     HapticFeedback.mediumImpact();
-    setState(() => _pokeSent = true);
-    await _firestore.sendPoke(
-        _auth.currentUser!.uid, 'partner', _auth.myName);
-    await Future.delayed(const Duration(seconds: 2));
-    if (mounted) setState(() => _pokeSent = false);
-  }
-
-  Future<void> _signOut() async {
-    await _auth.signOut();
+    
+    await _firestore.sendPoke(coupleId, myUid, _auth.myName);
   }
 
   @override
@@ -186,7 +229,7 @@ class _HomeScreenState extends State<HomeScreen>
                     .textTheme
                     .bodySmall
                     ?.copyWith(color: AppTheme.textMuted)),
-            Text('Ray & Aproo',
+            Text('Raayyy & Aproo',
                 style: GoogleFonts.playfairDisplay(
                   fontSize: 26,
                   fontWeight: FontWeight.w700,
@@ -199,39 +242,7 @@ class _HomeScreenState extends State<HomeScreen>
             GestureDetector(
               onTap: () => Navigator.push(
                 context,
-                MaterialPageRoute(
-                  builder: (_) =>
-                      SearchScreen(onNavigate: widget.onNavigate),
-                ),
-              ),
-              child: Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: AppTheme.surface,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: AppTheme.divider),
-                ),
-                child: const Icon(Icons.search_rounded,
-                    color: AppTheme.textMuted, size: 20),
-              ),
-            ),
-            const SizedBox(width: 10),
-            GestureDetector(
-              onTap: () => showDialog(
-                context: context,
-                builder: (_) => AlertDialog(
-                  title: const Text('Sign out?'),
-                  content: Text('Signing out as ${_auth.myName}'),
-                  actions: [
-                    TextButton(
-                        onPressed: () => Navigator.pop(context),
-                        child: const Text('Cancel')),
-                    TextButton(
-                        onPressed: _signOut,
-                        child: const Text('Sign out',
-                            style: TextStyle(color: Colors.red))),
-                  ],
-                ),
+                MaterialPageRoute(builder: (_) => const SettingsScreen()),
               ),
               child: Container(
                 padding: const EdgeInsets.all(10),
@@ -251,31 +262,23 @@ class _HomeScreenState extends State<HomeScreen>
 
   Widget _buildDistanceCard() {
     final dist = _distanceKm;
+    final locality = _partnerLocation?['locality'] as String?;
 
-    String label;
     String headline;
-    String subline;
 
-    if (_locationLoading) {
-      label = 'Finding location…';
-      headline = '';
-      subline = '';
+    if (_locationLoading && _partnerLocation == null) {
+      headline = 'Searching...';
     } else if (dist == null) {
-      label = 'Location';
-      headline = 'Waiting for ${_auth.partnerName}\'s location';
-      subline = 'Updates when they open the app';
+      headline = 'Waiting for ${_auth.partnerName}';
     } else if (dist < 1.0) {
-      label = 'Right here';
       headline = "You're right beside each other";
-      subline = 'Since ${_formatDate(_togetherSince)}';
     } else {
-      label = 'Distance';
       headline = '${_auth.partnerName} is ${_formatKm(dist)} away';
-      subline = 'Since ${_formatDate(_togetherSince)}';
     }
 
     return Container(
       width: double.infinity,
+      constraints: const BoxConstraints(minHeight: 140),
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
@@ -285,36 +288,60 @@ class _HomeScreenState extends State<HomeScreen>
         ),
         borderRadius: BorderRadius.circular(20),
       ),
-      child: _locationLoading
-          ? const SizedBox(
-              height: 60,
-              child: Center(
-                  child: CircularProgressIndicator(color: Colors.white54)),
-            )
-          : Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(label,
-                    style: GoogleFonts.dmSans(
-                        color: Colors.white70,
-                        fontSize: 13,
-                        letterSpacing: 0.3)),
-                const SizedBox(height: 8),
-                Text(headline,
-                    style: GoogleFonts.playfairDisplay(
-                      color: Colors.white,
-                      fontSize: headline.length > 24 ? 21 : 27,
-                      fontWeight: FontWeight.w700,
-                      height: 1.2,
-                    )),
-                if (subline.isNotEmpty) ...[
-                  const SizedBox(height: 6),
-                  Text(subline,
-                      style: GoogleFonts.dmSans(
-                          color: Colors.white54, fontSize: 12)),
-                ],
-              ],
-            ),
+      child: Stack(
+        children: [
+          // Refresh / Loading Icon
+          Positioned(
+            top: 0,
+            right: 0,
+            child: _isRefreshing
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white70,
+                    ),
+                  )
+                : GestureDetector(
+                    onTap: _forceRefresh,
+                    child: const Icon(
+                      Icons.refresh_rounded,
+                      color: Colors.white70,
+                      size: 20,
+                    ),
+                  ),
+          ),
+          Center(
+            child: _locationLoading && _partnerLocation == null
+                ? const CircularProgressIndicator(color: Colors.white54)
+                : Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(headline,
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.playfairDisplay(
+                            color: Colors.white,
+                            fontSize: headline.length > 24 ? 21 : 27,
+                            fontWeight: FontWeight.w700,
+                            height: 1.2,
+                          )),
+                      if (locality != null && dist != null && dist >= 1.0) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'Currently in $locality',
+                          style: GoogleFonts.dmSans(
+                            color: Colors.white.withValues(alpha: 0.7),
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -329,7 +356,7 @@ class _HomeScreenState extends State<HomeScreen>
       child: Row(
         children: [
           Expanded(
-              child: _lastSeenTile('Ray', _rayIsOnline, _rayLastSeen)),
+              child: _lastSeenTile('Raayyy', _raayyyIsOnline, _raayyyLastSeen)),
           Container(
               width: 1,
               height: 36,
@@ -380,6 +407,9 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Widget _buildPokeCard() {
+    final myUid = _auth.currentUser?.uid;
+    final canPoke = _lastPokeFrom != myUid;
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -394,12 +424,16 @@ class _HomeScreenState extends State<HomeScreen>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('Poke ${_auth.partnerName}',
-                    style: Theme.of(context).textTheme.titleMedium),
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleMedium
+                        ?.copyWith(
+                            color: canPoke ? null : AppTheme.textMuted)),
                 const SizedBox(height: 4),
                 Text(
-                  _pokeSent
-                      ? '${_auth.partnerName} has been poked! 💕'
-                      : 'Let them know you\'re thinking of them',
+                  canPoke
+                      ? 'Let them know you\'re thinking of them'
+                      : 'You poked ${_auth.partnerName}! 💕',
                   style: Theme.of(context)
                       .textTheme
                       .bodySmall
@@ -412,17 +446,19 @@ class _HomeScreenState extends State<HomeScreen>
           ScaleTransition(
             scale: _pokeScale,
             child: GestureDetector(
-              onTap: _pokeSent ? null : _sendPoke,
+              onTap: canPoke ? _sendPoke : null,
               child: Container(
                 width: 52,
                 height: 52,
                 decoration: BoxDecoration(
-                  color: AppTheme.primaryLight,
+                  color: canPoke
+                      ? AppTheme.primaryLight
+                      : AppTheme.divider.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(16),
                 ),
                 child: Icon(
-                  _pokeSent ? Icons.favorite : Icons.touch_app_rounded,
-                  color: AppTheme.primary,
+                  !canPoke ? Icons.favorite : Icons.touch_app_rounded,
+                  color: canPoke ? AppTheme.primary : AppTheme.textMuted,
                   size: 26,
                 ),
               ),
@@ -479,21 +515,13 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  String _formatDate(DateTime d) {
-    const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
-    ];
-    return '${months[d.month - 1]} ${d.day}, ${d.year}';
-  }
-
   String _formatKm(double km) {
     final rounded = km.round();
     if (rounded >= 1000) {
       final s = rounded.toString();
       final insert = s.length - 3;
-      return '${s.substring(0, insert)},${s.substring(insert)} km';
+      return '${s.substring(0, insert)},${s.substring(insert)} kms';
     }
-    return '$rounded km';
+    return '$rounded kms';
   }
 }

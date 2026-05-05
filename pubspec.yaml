@@ -1,7 +1,7 @@
 name: tether
-description: "Tether - Ray & Aproo"
+description: "Tether - Raayyy & Aproo"
 publish_to: 'none'
-version: 1.0.6+6
+version: 1.0.7+7
 
 environment:
   sdk: ^3.11.5
@@ -39,6 +39,8 @@ dependencies:
   geolocator: ^13.0.2
   dart_jsonwebtoken: ^2.8.0
   flutter_local_notifications: ^18.0.0
+  geocoding: ^4.0.0
+  permission_handler: ^12.0.1
 
 dev_dependencies:
   flutter_test:
