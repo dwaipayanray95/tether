@@ -5,7 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'fcm_service.dart';
 
 class LocationService {
-  static const _coupleId = 'raayyy-aproo';
+  static const _coupleId = 'ray-aproo';
 
   static Future<String?> getLocality(double lat, double lng) async {
     try {
@@ -129,7 +129,7 @@ class LocationService {
   }
 
   static Future<void> pingPartner(String myName) async {
-    final partnerName = myName == 'Raayyy' ? 'aproo' : 'raayyy';
+    final partnerName = myName == 'Ray' ? 'aproo' : 'ray';
     await FcmService.send(
       partnerName: partnerName,
       title: '📍 $myName is checking in!',

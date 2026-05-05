@@ -55,7 +55,7 @@ class FcmService {
   static Future<String?> _getPartnerToken(String partnerName) async {
     final snap = await FirebaseFirestore.instance
         .collection('couples')
-        .doc('raayyy-aproo')
+        .doc('ray-aproo')
         .collection('fcmTokens')
         .doc(partnerName.toLowerCase())
         .get();

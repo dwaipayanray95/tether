@@ -168,7 +168,7 @@ class ChatScreenState extends State<ChatScreen> {
                 style: const TextStyle(fontSize: 16),
                 onChanged: (v) => setState(() => _searchQuery = v.trim()),
               )
-            : const Text('Raayyy & Aproo'),
+            : const Text('Ray & Aproo'),
         actions: [
           if (_searchActive)
             IconButton(

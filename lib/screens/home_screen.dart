@@ -38,14 +38,13 @@ class _HomeScreenState extends State<HomeScreen>
   bool _isRefreshing = false;
 
   // Last seen
-  Timestamp? _raayyyLastSeen;
-  bool _raayyyIsOnline = false;
+  Timestamp? _rayLastSeen;
+  bool _rayIsOnline = false;
   Timestamp? _aprooLastSeen;
   bool _aprooIsOnline = false;
 
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _partnerLocSub;
-  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _raayyyPresenceSub;
-  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _aprooPresenceSub;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _presenceSub;
 
   double? get _distanceKm {
     final p = _partnerLocation;
@@ -82,8 +81,7 @@ class _HomeScreenState extends State<HomeScreen>
   void dispose() {
     _pokeController.dispose();
     _partnerLocSub?.cancel();
-    _raayyyPresenceSub?.cancel();
-    _aprooPresenceSub?.cancel();
+    _presenceSub?.cancel();
     _pokeSub?.cancel();
     super.dispose();
   }
@@ -103,8 +101,8 @@ class _HomeScreenState extends State<HomeScreen>
       return;
     }
 
-    final myKey = _auth.isRaayyy ? 'raayyy' : 'aproo';
-    final partnerKey = _auth.isRaayyy ? 'aproo' : 'raayyy';
+    final myKey = _auth.isRay ? 'ray' : 'aproo';
+    final partnerKey = _auth.isRay ? 'aproo' : 'ray';
 
     // Fetch initial state first so we don't show empty state
     final initialPartner = await LocationService.getLocation(partnerKey);
@@ -137,7 +135,7 @@ class _HomeScreenState extends State<HomeScreen>
     HapticFeedback.mediumImpact();
     setState(() => _isRefreshing = true);
 
-    final myKey = _auth.isRaayyy ? 'raayyy' : 'aproo';
+    final myKey = _auth.isRay ? 'ray' : 'aproo';
     final myPos = await LocationService.getCurrentPosition();
     if (myPos != null) {
       await LocationService.forceUpload(myPos, myKey, _auth.myName);
@@ -154,21 +152,21 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   void _initPresence() {
-    _raayyyPresenceSub = _firestore.presenceStream('raayyy').listen((snap) {
+    _presenceSub = _firestore.presenceStream().listen((snap) {
       final data = snap.data();
-      if (mounted) {
+      if (mounted && data != null) {
         setState(() {
-          _raayyyLastSeen = data?['lastSeen'] as Timestamp?;
-          _raayyyIsOnline = data?['isOnline'] as bool? ?? false;
-        });
-      }
-    });
-    _aprooPresenceSub = _firestore.presenceStream('aproo').listen((snap) {
-      final data = snap.data();
-      if (mounted) {
-        setState(() {
-          _aprooLastSeen = data?['lastSeen'] as Timestamp?;
-          _aprooIsOnline = data?['isOnline'] as bool? ?? false;
+          final r = data['ray'] as Map<String, dynamic>?;
+          final a = data['aproo'] as Map<String, dynamic>?;
+
+          if (r != null) {
+            _rayLastSeen = r['lastSeen'] as Timestamp?;
+            _rayIsOnline = r['isOnline'] as bool? ?? false;
+          }
+          if (a != null) {
+            _aprooLastSeen = a['lastSeen'] as Timestamp?;
+            _aprooIsOnline = a['isOnline'] as bool? ?? false;
+          }
         });
       }
     });
@@ -356,7 +354,7 @@ class _HomeScreenState extends State<HomeScreen>
       child: Row(
         children: [
           Expanded(
-              child: _lastSeenTile('Raayyy', _raayyyIsOnline, _raayyyLastSeen)),
+              child: _lastSeenTile('Raayyy', _rayIsOnline, _rayLastSeen)),
           Container(
               width: 1,
               height: 36,

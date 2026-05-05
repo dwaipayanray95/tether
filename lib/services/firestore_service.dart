@@ -15,7 +15,7 @@ class FirestoreService {
       'fromName': fromName,
       'sentAt': FieldValue.serverTimestamp(),
     });
-    final partnerName = fromName == 'Raayyy' ? 'aproo' : 'raayyy';
+    final partnerName = fromName == 'Ray' ? 'aproo' : 'ray';
     FcmService.send(
       partnerName: partnerName,
       title: '💕 $fromName poked you!',
@@ -47,7 +47,7 @@ class FirestoreService {
         .doc(coupleId)
         .collection('todos')
         .add(todo.toMap());
-    final partnerName = todo.createdBy == 'Raayyy' ? 'aproo' : 'raayyy';
+    final partnerName = todo.createdBy == 'Ray' ? 'aproo' : 'ray';
     FcmService.send(
       partnerName: partnerName,
       title: '✅ New task added',
@@ -109,7 +109,7 @@ class FirestoreService {
         .doc(todoId)
         .collection('comments')
         .add(comment.toMap());
-    final partnerName = comment.authorName == 'Raayyy' ? 'aproo' : 'raayyy';
+    final partnerName = comment.authorName == 'Ray' ? 'aproo' : 'ray';
     FcmService.send(
       partnerName: partnerName,
       title: '🗨️ ${comment.authorName} commented',
@@ -152,7 +152,7 @@ class FirestoreService {
         .collection('messages')
         .add(message.toMap());
     if (senderName.isNotEmpty) {
-      final partnerName = senderName == 'Raayyy' ? 'aproo' : 'raayyy';
+      final partnerName = senderName == 'Ray' ? 'aproo' : 'ray';
       final preview = message.text.length > 60
           ? '${message.text.substring(0, 60)}…'
           : message.text;
@@ -229,16 +229,16 @@ class FirestoreService {
   // ── Presence / last seen ─────────────────────────────────────────────────
 
   Future<void> updatePresence(String myKey, {bool isOnline = true}) async {
-    await _db.doc('couples/raayyy-aproo/presence/$myKey').set({
-      'lastSeen': FieldValue.serverTimestamp(),
-      'isOnline': isOnline,
+    await _db.doc('couples/ray-aproo/status/presence').set({
+      myKey: {
+        'lastSeen': FieldValue.serverTimestamp(),
+        'isOnline': isOnline,
+      }
     }, SetOptions(merge: true));
   }
 
-  Stream<DocumentSnapshot<Map<String, dynamic>>> presenceStream(String key) {
-    return _db
-        .doc('couples/raayyy-aproo/presence/$key')
-        .snapshots();
+  Stream<DocumentSnapshot<Map<String, dynamic>>> presenceStream() {
+    return _db.doc('couples/ray-aproo/status/presence').snapshots();
   }
 
   // ── Couple profile ────────────────────────────────────────────────────────
