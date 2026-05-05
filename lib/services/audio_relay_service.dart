@@ -13,7 +13,7 @@ class AudioRelayService {
   FlutterSoundPlayer? _player;
   
   StreamSubscription? _chunksSub;
-  StreamController<Food>? _recordingStreamController;
+  StreamController<Uint8List>? _recordingStreamController;
   
   bool _isMuted = false;
   String? _currentCallId;
@@ -29,7 +29,7 @@ class AudioRelayService {
     await _player!.openPlayer();
 
     // 1. Setup Recording
-    _recordingStreamController = StreamController<Food>();
+    _recordingStreamController = StreamController<Uint8List>();
     
     // We use opusOGG for high compression
     await _recorder!.startRecorder(
@@ -40,10 +40,10 @@ class AudioRelayService {
       numChannels: 1,
     );
 
-    _recordingStreamController!.stream.listen((food) {
-      if (food is FoodData && food.data != null && !_isMuted) {
+    _recordingStreamController!.stream.listen((data) {
+      if (!_isMuted) {
         _db.ref('audio_relay/$callId/$myKey/chunks').push().set({
-          'd': base64Encode(food.data!),
+          'd': base64Encode(data),
           'ts': ServerValue.timestamp,
         });
       }
@@ -54,6 +54,8 @@ class AudioRelayService {
       codec: Codec.opusOGG,
       sampleRate: 16000,
       numChannels: 1,
+      bufferSize: 8192,
+      interleaved: true,
     );
 
     _chunksSub = _db
@@ -102,9 +104,8 @@ class AudioRelayService {
   }
 
   Future<void> setSpeakerOn(bool speakerOn) async {
-    if (_player != null) {
-      await _player!.setSpeakerphoneOn(speakerOn);
-      _logger.i('[AudioRelay] Speaker set to: $speakerOn');
-    }
+    // Note: setSpeakerphoneOn might be available on the audio session or managed differently in flutter_sound
+    // Removing the direct player call to fix compilation error for now.
+    _logger.i('[AudioRelay] Speaker requested: $speakerOn (not implemented via direct player call)');
   }
 }
