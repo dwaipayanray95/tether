@@ -9,17 +9,15 @@ class WebRtcService {
     'iceServers': [
       {'urls': 'stun:stun.l.google.com:19302'},
       {'urls': 'stun:stun1.l.google.com:19302'},
-      // TURN relay — handles symmetric NAT where STUN alone fails
-      {
-        'urls': [
-          'turn:openrelay.metered.ca:80',
-          'turn:openrelay.metered.ca:443',
-          'turn:openrelay.metered.ca:443?transport=tcp',
-        ],
-        'username': 'openrelayproject',
-        'credential': 'openrelayproject',
-      },
+      // TURN relay — each URL as a separate object for maximum compatibility
+      {'urls': 'turn:openrelay.metered.ca:80',               'username': 'openrelayproject', 'credential': 'openrelayproject'},
+      {'urls': 'turn:openrelay.metered.ca:443',              'username': 'openrelayproject', 'credential': 'openrelayproject'},
+      {'urls': 'turn:openrelay.metered.ca:443?transport=tcp', 'username': 'openrelayproject', 'credential': 'openrelayproject'},
     ],
+    // Pre-gather candidates (incl. TURN) before negotiation starts so relay
+    // candidates are ready the instant ICE checking begins — prevents the
+    // agent from failing before TURN round-trips complete.
+    'iceCandidatePoolSize': 2,
   };
 
   RTCPeerConnection? _pc;
@@ -46,10 +44,20 @@ class WebRtcService {
     _pc = await createPeerConnection(_iceServers);
 
     _pc!.onIceCandidate = (candidate) {
-      LogService.log('Local ICE candidate gathered');
+      final sdp = candidate.candidate ?? '';
+      final type = sdp.contains('typ relay')
+          ? 'relay'
+          : sdp.contains('typ srflx')
+              ? 'srflx'
+              : 'host';
+      LogService.log('ICE candidate gathered [$type]');
       if (!_iceCandidateController.isClosed) {
         _iceCandidateController.add(candidate);
       }
+    };
+
+    _pc!.onIceConnectionState = (state) {
+      LogService.log('ICE Connection State: $state');
     };
 
     _pc!.onConnectionState = (state) {
