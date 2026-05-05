@@ -87,16 +87,22 @@ class _SearchScreenState extends State<SearchScreen> {
       appBar: AppBar(
         centerTitle: false,
         titleSpacing: 0,
-        title: TextField(
-          controller: _searchCtrl,
-          autofocus: true,
-          decoration: const InputDecoration(
-            hintText: 'Search chats & to-dos…',
-            border: InputBorder.none,
-            hintStyle: TextStyle(color: AppTheme.textMuted),
+        title: Padding(
+          padding: const EdgeInsets.only(right: 8),
+          child: TextField(
+            controller: _searchCtrl,
+            autofocus: true,
+            decoration: const InputDecoration(
+              hintText: 'Search chats & to-dos…',
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              hintStyle: TextStyle(color: AppTheme.textMuted),
+              contentPadding: EdgeInsets.zero,
+            ),
+            style: const TextStyle(fontSize: 16),
+            onChanged: (v) => setState(() => _query = v.trim()),
           ),
-          style: const TextStyle(fontSize: 16),
-          onChanged: (v) => setState(() => _query = v.trim()),
         ),
         actions: [
           if (_loadingMessages)
