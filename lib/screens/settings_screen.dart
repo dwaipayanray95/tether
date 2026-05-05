@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
+import 'diagnostics_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -40,6 +42,17 @@ class SettingsScreen extends StatelessWidget {
             onTap: () {},
           ),
           const SizedBox(height: 24),
+          _buildSectionHeader('Diagnostics'),
+          _buildTile(
+            icon: Icons.bug_report_outlined,
+            title: 'Diagnostics',
+            subtitle: 'Logging and troubleshooting tools',
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const DiagnosticsScreen()),
+            ),
+          ),
+          const SizedBox(height: 24),
           _buildSectionHeader('Account'),
           _buildTile(
             icon: Icons.logout_rounded,
@@ -50,12 +63,18 @@ class SettingsScreen extends StatelessWidget {
           ),
           const SizedBox(height: 40),
           Center(
-            child: Text(
-              'Tether v1.0.6',
-              style: GoogleFonts.dmSans(
-                color: AppTheme.textMuted,
-                fontSize: 12,
-              ),
+            child: FutureBuilder<PackageInfo>(
+              future: PackageInfo.fromPlatform(),
+              builder: (context, snap) {
+                final version = snap.data?.version ?? '…';
+                return Text(
+                  'Tether v$version',
+                  style: GoogleFonts.dmSans(
+                    color: AppTheme.textMuted,
+                    fontSize: 12,
+                  ),
+                );
+              },
             ),
           ),
         ],
