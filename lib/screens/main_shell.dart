@@ -1,13 +1,17 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'home_screen.dart';
 import 'chat_screen.dart';
 import 'todo_screen.dart';
+import 'call_screen.dart';
 import '../theme/app_theme.dart';
 import '../widgets/update_dialog.dart';
 import '../services/firestore_service.dart';
 import '../services/notification_service.dart';
 import '../services/auth_service.dart';
+import '../services/call_service.dart';
 
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
@@ -25,28 +29,68 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   String get _myUid => FirebaseAuth.instance.currentUser?.uid ?? '';
   String get _myPresenceKey => _auth.isRay ? 'ray' : 'aproo';
 
+  StreamSubscription? _incomingCallSub;
+  bool _callScreenOpen = false;
+
   void _goToTab(int index) => setState(() => _currentIndex = index);
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    // Mark as online when app starts
     _firestore.updatePresence(_myPresenceKey, isOnline: true);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (NotificationService.pendingTab != null) {
-        setState(() => _currentIndex = NotificationService.pendingTab!);
-        NotificationService.pendingTab = null;
-      }
+      // Handle notification-triggered navigation on cold start
+      _handlePendingNotification();
       Future.delayed(const Duration(seconds: 3), () {
         if (mounted) UpdateDialog.checkAndShow(context);
       });
+      // Listen for incoming calls via Firestore
+      _listenIncomingCalls();
+    });
+  }
+
+  void _handlePendingNotification() {
+    if (NotificationService.pendingTab != null) {
+      setState(() => _currentIndex = NotificationService.pendingTab!);
+      NotificationService.pendingTab = null;
+    }
+    if (NotificationService.pendingCallId != null) {
+      final id = NotificationService.pendingCallId!;
+      NotificationService.pendingCallId = null;
+      _openIncomingCallScreen(id);
+    }
+  }
+
+  void _listenIncomingCalls() {
+    _incomingCallSub =
+        CallService.incomingCallStream(_auth.myName).listen((doc) {
+      if (doc == null || _callScreenOpen) return;
+      final callId = doc.id;
+      _openIncomingCallScreen(callId);
+    });
+  }
+
+  void _openIncomingCallScreen(String callId) {
+    if (_callScreenOpen || !mounted) return;
+    _callScreenOpen = true;
+    Navigator.of(context)
+        .push(MaterialPageRoute(
+      builder: (_) => CallScreen(
+        isOutgoing: false,
+        partnerName: _auth.partnerName,
+        callId: callId,
+      ),
+    ))
+        .then((_) {
+      _callScreenOpen = false;
     });
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _incomingCallSub?.cancel();
     super.dispose();
   }
 
@@ -68,7 +112,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    // Handle notification-triggered navigation
+    // Handle notification-triggered navigation on warm resume
     if (NotificationService.pendingTab != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && NotificationService.pendingTab != null) {
@@ -77,12 +121,20 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         }
       });
     }
+    if (NotificationService.pendingCallId != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && NotificationService.pendingCallId != null) {
+          final id = NotificationService.pendingCallId!;
+          NotificationService.pendingCallId = null;
+          _openIncomingCallScreen(id);
+        }
+      });
+    }
 
     final screens = [
       HomeScreen(
         onNavigate: _goToTab,
         onSelectMessage: (id) {
-          // Switch to chat tab first, then scroll once it's mounted
           setState(() => _currentIndex = 1);
           WidgetsBinding.instance.addPostFrameCallback((_) {
             _chatKey.currentState?.scrollToMessageById(id);
@@ -95,11 +147,12 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
 
     return PopScope(
       canPop: _currentIndex == 0 &&
-          !(_currentIndex == 1 && _chatKey.currentState?.isSearchActive == true),
+          !(_currentIndex == 1 &&
+              _chatKey.currentState?.isSearchActive == true),
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
-        
-        if (_currentIndex == 1 && _chatKey.currentState?.isSearchActive == true) {
+        if (_currentIndex == 1 &&
+            _chatKey.currentState?.isSearchActive == true) {
           _chatKey.currentState?.closeSearch();
         } else {
           setState(() => _currentIndex = 0);
