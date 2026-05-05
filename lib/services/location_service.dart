@@ -3,6 +3,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'fcm_service.dart';
+import 'log_service.dart';
 
 class LocationService {
   static const _coupleId = 'ray-aproo';
@@ -50,6 +51,7 @@ class LocationService {
   }
 
   static Future<Position?> getCurrentPosition() async {
+    LogService.log('Requesting current location');
     try {
       return await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
@@ -63,6 +65,7 @@ class LocationService {
   }
 
   static Future<void> forceUpload(Position pos, String myKey, String myName) async {
+    LogService.log('Force uploading location for $myName');
     final locality = await getLocality(pos.latitude, pos.longitude);
     await FirebaseFirestore.instance
         .doc('couples/$_coupleId/locations/$myKey')
@@ -77,6 +80,7 @@ class LocationService {
 
   // Only writes to Firestore if moved >100m or >10 min since last upload
   static Future<void> updateIfNeeded(Position pos, String myKey, String myName) async {
+    LogService.log('Checking if location update needed for $myName');
     final prefs = await SharedPreferences.getInstance();
     final lastLat = prefs.getDouble('loc_lat_$myKey');
     final lastLng = prefs.getDouble('loc_lng_$myKey');
@@ -98,6 +102,7 @@ class LocationService {
     if (lastLocality == null) shouldUpload = true;
 
     if (shouldUpload) {
+      LogService.log('Uploading location update');
       final locality = await getLocality(pos.latitude, pos.longitude);
       await FirebaseFirestore.instance
           .doc('couples/$_coupleId/locations/$myKey')
@@ -129,6 +134,7 @@ class LocationService {
   }
 
   static Future<void> pingPartner(String myName) async {
+    LogService.log('Pinging partner for location update');
     final partnerName = myName == 'Ray' ? 'aproo' : 'ray';
     await FcmService.send(
       partnerName: partnerName,

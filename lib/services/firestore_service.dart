@@ -3,6 +3,7 @@ import '../models/todo_model.dart';
 import '../models/comment_model.dart';
 import '../models/message_model.dart';
 import 'fcm_service.dart';
+import 'log_service.dart';
 
 class FirestoreService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -10,6 +11,7 @@ class FirestoreService {
   // ── Poke ──────────────────────────────────────────────────────────────────
 
   Future<void> sendPoke(String coupleId, String fromUid, String fromName) async {
+    LogService.log('Sending poke from $fromName');
     await _db.doc('couples/$coupleId/pokes/status').set({
       'lastFrom': fromUid,
       'fromName': fromName,
@@ -42,6 +44,7 @@ class FirestoreService {
   }
 
   Future<void> addTodo(String coupleId, TodoItem todo) async {
+    LogService.log('Adding to-do: ${todo.title}');
     await _db
         .collection('couples')
         .doc(coupleId)
@@ -176,6 +179,7 @@ class FirestoreService {
 
   Future<void> sendMessage(String coupleId, Message message,
       {String senderName = ''}) async {
+    LogService.log('Sending message: ${message.text.substring(0, message.text.length > 20 ? 20 : message.text.length)}...');
     await _db
         .collection('couples')
         .doc(coupleId)
@@ -259,6 +263,7 @@ class FirestoreService {
   // ── Presence / last seen ─────────────────────────────────────────────────
 
   Future<void> updatePresence(String myKey, {bool isOnline = true}) async {
+    LogService.log('Updating presence for $myKey: ${isOnline ? 'ONLINE' : 'OFFLINE'}');
     await _db.doc('couples/ray-aproo/status/presence').set({
       myKey: {
         'lastSeen': FieldValue.serverTimestamp(),

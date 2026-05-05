@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'log_service.dart';
 
 // Only these two emails are allowed in
 const List<String> allowedEmails = [
@@ -27,11 +28,16 @@ class AuthService {
   // ── Google Sign-In ────────────────────────────────────────────────────────
 
   Future<UserCredential?> signInWithGoogle() async {
+    LogService.log('Google Sign-In initiated');
     final googleUser = await _googleSignIn.signIn();
-    if (googleUser == null) return null; // user cancelled
+    if (googleUser == null) {
+      LogService.log('Google Sign-In cancelled by user');
+      return null;
+    }
 
     final email = googleUser.email.toLowerCase();
     if (!allowedEmails.map((e) => e.toLowerCase()).contains(email)) {
+      LogService.log('Sign-In REJECTED: $email not allowed');
       await _googleSignIn.signOut();
       throw Exception('This app is private. Your Google account is not allowed.');
     }
@@ -43,6 +49,7 @@ class AuthService {
     );
 
     final result = await _auth.signInWithCredential(credential);
+    LogService.log('Sign-In SUCCESS: ${result.user?.email}');
     await _ensureUserDoc(result.user!);
     return result;
   }
@@ -50,27 +57,44 @@ class AuthService {
   // ── Email / Password ──────────────────────────────────────────────────────
 
   Future<UserCredential> signIn(String email, String password) async {
+    LogService.log('Email Sign-In initiated: $email');
     if (!allowedEmails.map((e) => e.toLowerCase()).contains(email.toLowerCase())) {
+      LogService.log('Sign-In REJECTED: $email not allowed');
       throw Exception('This app is private. That email is not allowed.');
     }
-    final result = await _auth.signInWithEmailAndPassword(
-        email: email, password: password);
-    await _ensureUserDoc(result.user!);
-    return result;
+    try {
+      final result = await _auth.signInWithEmailAndPassword(
+          email: email, password: password);
+      LogService.log('Sign-In SUCCESS: $email');
+      await _ensureUserDoc(result.user!);
+      return result;
+    } catch (e) {
+      LogService.log('Sign-In ERROR: $e');
+      rethrow;
+    }
   }
 
   Future<UserCredential> signUp(
       String email, String password, String name) async {
+    LogService.log('Sign-Up initiated: $email');
     if (!allowedEmails.map((e) => e.toLowerCase()).contains(email.toLowerCase())) {
+      LogService.log('Sign-Up REJECTED: $email not allowed');
       throw Exception('This app is private. That email is not allowed.');
     }
-    final result = await _auth.createUserWithEmailAndPassword(
-        email: email, password: password);
-    await _ensureUserDoc(result.user!, name: name);
-    return result;
+    try {
+      final result = await _auth.createUserWithEmailAndPassword(
+          email: email, password: password);
+      LogService.log('Sign-Up SUCCESS: $email');
+      await _ensureUserDoc(result.user!, name: name);
+      return result;
+    } catch (e) {
+      LogService.log('Sign-Up ERROR: $e');
+      rethrow;
+    }
   }
 
   Future<void> signOut() async {
+    LogService.log('Sign-Out initiated');
     await _googleSignIn.signOut();
     await _auth.signOut();
   }

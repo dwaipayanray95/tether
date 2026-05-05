@@ -83,16 +83,17 @@ class NotificationService {
 
   // Default channel — messages, pokes, to-dos
   static const _defaultChannel = AndroidNotificationChannel(
-    'tether_default',
-    'Tether',
+    'tether_updates_v1',
+    'Tether Notifications',
     description: 'Messages, pokes and to-dos',
-    importance: Importance.high,
+    importance: Importance.max,
     playSound: true,
+    enableVibration: true,
   );
 
   // Call channel — max importance so fullScreenIntent works
   static const _callChannel = AndroidNotificationChannel(
-    'tether_calls',
+    'tether_calls_v1',
     'Incoming Calls',
     description: 'Incoming voice calls from your partner',
     importance: Importance.max,
@@ -106,6 +107,7 @@ class NotificationService {
   // ── Pending navigation set before MainShell reads them ───────────────────
   static int? pendingTab;
   static String? pendingCallId;
+  static String? lastHandledCallId; // to prevent double-trigger in MainShell
 
   // ── init ─────────────────────────────────────────────────────────────────
 
@@ -212,7 +214,10 @@ class NotificationService {
         pendingTab = 1;
       } else if (type == 'call') {
         final callId = data['callId'] as String?;
-        if (callId != null) pendingCallId = callId;
+        if (callId != null) {
+          pendingCallId = callId;
+          lastHandledCallId = callId;
+        }
       }
     } catch (e) {
       LogService.log('Error parsing notification payload: $e');
@@ -220,6 +225,14 @@ class NotificationService {
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
+
+  static Future<void> showTest() async {
+    await _showLocal(
+      title: '🔔 Test Notification',
+      body: 'If you hear this, sound and vibration are working!',
+      payload: jsonEncode({'type': 'test'}),
+    );
+  }
 
   static Future<void> _showLocal({
     required String title,
@@ -235,8 +248,8 @@ class NotificationService {
           _defaultChannel.id,
           _defaultChannel.name,
           channelDescription: _defaultChannel.description,
-          importance: Importance.high,
-          priority: Priority.high,
+          importance: Importance.max,
+          priority: Priority.max,
           playSound: true,
           enableVibration: true,
           icon: '@mipmap/ic_launcher',
