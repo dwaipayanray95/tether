@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:open_file/open_file.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
+import 'log_service.dart';
 
 class UpdateInfo {
   final String version;
@@ -20,6 +21,7 @@ class UpdateService {
       'https://api.github.com/repos/dwaipayanray95/tether/releases/latest';
 
   static Future<UpdateInfo?> checkForUpdate() async {
+    LogService.log('Checking for app updates...');
     try {
       final info = await PackageInfo.fromPlatform();
       final current = info.version;
@@ -42,11 +44,14 @@ class UpdateService {
       final downloadUrl = apkAsset['browser_download_url'] as String;
 
       if (_isNewer(tag, current)) {
+        LogService.log('Update AVAILABLE: $tag (current: $current)');
         return UpdateInfo(
             version: tag, downloadUrl: downloadUrl, releaseNotes: notes);
       }
+      LogService.log('App is up to date ($current)');
       return null;
-    } catch (_) {
+    } catch (e) {
+      LogService.log('Error checking for update: $e');
       return null;
     }
   }
@@ -55,6 +60,7 @@ class UpdateService {
     String url,
     void Function(double progress) onProgress,
   ) async {
+    LogService.log('Starting update download: $url');
     // Download to external cache so FileProvider can serve it
     final dirs = await getExternalCacheDirectories();
     final dir = dirs?.isNotEmpty == true
@@ -75,6 +81,7 @@ class UpdateService {
       path,
       type: 'application/vnd.android.package-archive',
     );
+    LogService.log('Update installer result: ${result.type} - ${result.message}');
 
     // Return error message if installation failed, null if successful
     if (result.type != ResultType.done) {

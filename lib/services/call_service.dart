@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'fcm_service.dart';
+import 'log_service.dart';
 
 /// Firestore signalling paths under couples/ray-aproo/calls/{callId}:
 ///   offer:       {sdp, type}
@@ -25,6 +26,7 @@ class CallService {
     required void Function(RTCSessionDescription answer) onAnswer,
     required void Function(RTCIceCandidate) onRemoteCandidate,
   }) async {
+    LogService.log('Starting outgoing call: $callerName');
     final ref = _db
         .collection('$_coupleDoc/calls')
         .doc();
@@ -43,6 +45,7 @@ class CallService {
       final data = snap.data();
       if (data == null) return;
       if (data['answer'] != null && data['status'] == 'active') {
+        LogService.log('Call ANSWERED: $callId');
         final a = Map<String, dynamic>.from(data['answer']);
         onAnswer(RTCSessionDescription(a['sdp'], a['type']));
         answerSub?.cancel();
@@ -79,6 +82,7 @@ class CallService {
   /// Writes a caller ICE candidate to Firestore.
   static Future<void> sendCallerCandidate(
       String callId, RTCIceCandidate c) async {
+    LogService.log('Sending caller ICE candidate');
     await _db
         .collection('$_coupleDoc/calls/$callId/callerCandidates')
         .add({
@@ -96,6 +100,7 @@ class CallService {
     required RTCSessionDescription answer,
     required void Function(RTCIceCandidate) onRemoteCandidate,
   }) async {
+    LogService.log('Answering call: $callId');
     final ref = _db.doc('$_coupleDoc/calls/$callId');
     await ref.update({
       'answer': {'sdp': answer.sdp, 'type': answer.type},
@@ -120,6 +125,7 @@ class CallService {
   /// Writes a callee ICE candidate to Firestore.
   static Future<void> sendCalleeCandidate(
       String callId, RTCIceCandidate c) async {
+    LogService.log('Sending callee ICE candidate');
     await _db
         .collection('$_coupleDoc/calls/$callId/calleeCandidates')
         .add({
@@ -132,9 +138,15 @@ class CallService {
   // ── End call ──────────────────────────────────────────────────────────────
 
   static Future<void> endCall(String callId) async {
+    LogService.log('Ending call: $callId');
     await _db
         .doc('$_coupleDoc/calls/$callId')
         .update({'status': 'ended'});
+  }
+
+  static Future<DocumentSnapshot<Map<String, dynamic>>> getCall(
+      String callId) {
+    return _db.doc('$_coupleDoc/calls/$callId').get();
   }
 
   // ── Incoming call stream ─────────────────────────────────────────────────
@@ -142,17 +154,13 @@ class CallService {
   /// Stream of the latest ringing call document (null when no active ring).
   static Stream<DocumentSnapshot<Map<String, dynamic>>?> incomingCallStream(
       String myName) {
-    // Watch the 2 most recent calls; show the one that's still ringing
     return _db
         .collection('$_coupleDoc/calls')
-        .orderBy('createdAt', descending: true)
-        .limit(2)
+        .where('status', isEqualTo: 'ringing')
         .snapshots()
         .map((snap) {
       for (final doc in snap.docs) {
-        final data = doc.data();
-        // It's incoming if callerName != me and status == ringing
-        if (data['callerName'] != myName && data['status'] == 'ringing') {
+        if (doc.data()['callerName'] != myName) {
           return doc;
         }
       }

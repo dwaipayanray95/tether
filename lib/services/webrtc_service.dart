@@ -74,9 +74,14 @@ class WebRtcService {
     // Handle incoming remote tracks — required for audio to be activated
     _pc!.onTrack = (RTCTrackEvent event) {
       LogService.log('Remote track received: ${event.track.kind}');
+      if (event.track.kind == 'audio') {
+        event.track.enabled = true;
+      }
     };
 
     // Default to earpiece (standard phone-call behaviour)
+    // On some Android devices, requesting microphone automatically switches
+    // to communication mode. We'll force it just to be sure.
     await Helper.setSpeakerphoneOn(false);
 
     // Capture microphone audio

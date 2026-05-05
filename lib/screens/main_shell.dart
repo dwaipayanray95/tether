@@ -89,6 +89,15 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     _incomingCallSub =
         CallService.incomingCallStream(_auth.myName).listen((doc) {
       if (doc == null || _callScreenOpen) return;
+      
+      // If we just handled this callId via notification, skip the stream trigger
+      if (NotificationService.lastHandledCallId == doc.id) {
+        LogService.log('Call ${doc.id} already handled via notification, skipping stream trigger');
+        // Clear it after skipping so the next call with same ID (if any) can work
+        NotificationService.lastHandledCallId = null;
+        return;
+      }
+
       final callId = doc.id;
       LogService.log('INCOMING CALL detected via Firestore: $callId');
       _openIncomingCallScreen(callId);
