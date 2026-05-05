@@ -4,7 +4,7 @@ import * as functions from "firebase-functions";
 admin.initializeApp();
 
 const db = admin.firestore();
-const COUPLE_ID = "ray-aproo";
+const COUPLE_ID = "raayyy-aproo";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

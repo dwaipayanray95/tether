@@ -74,6 +74,7 @@ class _SearchScreenState extends State<SearchScreen> {
 
     return Scaffold(
       appBar: AppBar(
+        centerTitle: false,
         titleSpacing: 0,
         title: TextField(
           controller: _searchCtrl,
@@ -82,7 +83,6 @@ class _SearchScreenState extends State<SearchScreen> {
             hintText: 'Search chats & to-dos…',
             border: InputBorder.none,
             hintStyle: TextStyle(color: AppTheme.textMuted),
-            contentPadding: EdgeInsets.zero,
           ),
           style: const TextStyle(fontSize: 16),
           onChanged: (v) => setState(() => _query = v.trim()),

@@ -27,7 +27,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   String _friendlyError(String raw) {
-    if (raw.contains('not allowed')) return 'This app is private — only Ray & Aproo can sign in.';
+    if (raw.contains('not allowed')) return 'This app is private — only Raayyy & Aproo can sign in.';
     if (raw.contains('network')) return 'Check your internet connection.';
     if (raw.contains('cancelled') || raw.contains('canceled')) return '';
     return 'Something went wrong. Try again.';
@@ -121,7 +121,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-              Text('Only Ray & Aproo can sign in',
+              Text('Only Raayyy & Aproo can sign in',
                   style: GoogleFonts.dmSans(
                       color: AppTheme.textMuted, fontSize: 12)),
               const Spacer(flex: 1),

@@ -1,13 +1,23 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'nav_service.dart';
+import 'location_service.dart';
+import 'auth_service.dart';
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  // FCM shows background notifications automatically when payload has
-  // a 'notification' field — nothing extra needed here.
+  await Firebase.initializeApp();
+  if (message.data['type'] == 'ping') {
+    final auth = AuthService();
+    final myKey = auth.isRaayyy ? 'raayyy' : 'aproo';
+    final pos = await LocationService.getCurrentPosition();
+    if (pos != null) {
+      await LocationService.forceUpload(pos, myKey, auth.myName);
+    }
+  }
 }
 
 class NotificationService {
@@ -53,8 +63,18 @@ class NotificationService {
     _messaging.onTokenRefresh.listen(_saveToken);
 
     // Foreground FCM → show local notification
-    FirebaseMessaging.onMessage.listen((message) {
+    FirebaseMessaging.onMessage.listen((message) async {
       final type = message.data['type'] as String? ?? '';
+      
+      if (type == 'ping') {
+        final auth = AuthService();
+        final myKey = auth.isRaayyy ? 'raayyy' : 'aproo';
+        final pos = await LocationService.getCurrentPosition();
+        if (pos != null) {
+          await LocationService.forceUpload(pos, myKey, auth.myName);
+        }
+      }
+
       // Suppress chat banner if user is already in chat
       if (type == 'chat' && chatIsOpen) return;
 
@@ -130,12 +150,12 @@ class NotificationService {
         .doc(uid)
         .set({'fcmToken': token}, SetOptions(merge: true));
 
-    const rayEmail = 'dwaipayanray95@gmail.com';
+    const raayyyEmail = 'dwaipayanray95@gmail.com';
     final email = FirebaseAuth.instance.currentUser?.email ?? '';
-    final myName = email == rayEmail ? 'ray' : 'aproo';
+    final myName = email == raayyyEmail ? 'raayyy' : 'aproo';
     await FirebaseFirestore.instance
         .collection('couples')
-        .doc('ray-aproo')
+        .doc('raayyy-aproo')
         .collection('fcmTokens')
         .doc(myName)
         .set({'token': token});

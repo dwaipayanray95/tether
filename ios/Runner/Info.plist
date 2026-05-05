@@ -24,6 +24,22 @@
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Tether needs your location so you can see each other's location.</string>
+	<key>NSLocationAlwaysUsageDescription</key>
+	<string>Tether needs your location to update your partner when the app is in background.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Tether needs your location to update your partner even when in background.</string>
+	<key>NSLocationTemporaryUsageDescriptionDictionary</key>
+	<dict>
+		<key>PreciseLocation</key>
+		<string>Tether needs precise location for accurate distance calculations.</string>
+	</dict>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+		<string>remote-notification</string>
+	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>

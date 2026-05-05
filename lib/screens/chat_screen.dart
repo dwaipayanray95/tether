@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:uuid/uuid.dart';
 import 'package:timeago/timeago.dart' as timeago;
+import 'package:intl/intl.dart';
 import '../models/message_model.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
@@ -16,17 +17,31 @@ const _reactionEmojis = [
 ];
 
 class ChatScreen extends StatefulWidget {
-  const ChatScreen({super.key});
+  final void Function(int)? onNavigate;
+
+  const ChatScreen({super.key, this.onNavigate});
 
   @override
-  State<ChatScreen> createState() => _ChatScreenState();
+  State<ChatScreen> createState() => ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> {
+class ChatScreenState extends State<ChatScreen> {
   final _firestore = FirestoreService();
+  bool get isSearchActive => _searchActive;
+
+  void closeSearch() {
+    if (mounted) {
+      setState(() {
+        _searchActive = false;
+        _searchQuery = '';
+        _searchCtrl.clear();
+      });
+    }
+  }
+
+  final _scrollCtrl = ScrollController();
   final _auth = AuthService();
   final _textCtrl = TextEditingController();
-  final _scrollCtrl = ScrollController();
   static const String _coupleId = coupleId;
 
   Message? _replyTo;
@@ -133,6 +148,14 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        centerTitle: _searchActive ? false : null,
+        leading: _searchActive
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back_rounded),
+                onPressed: closeSearch,
+              )
+            : null,
+        titleSpacing: _searchActive ? 0 : null,
         title: _searchActive
             ? TextField(
                 controller: _searchCtrl,
@@ -145,17 +168,14 @@ class _ChatScreenState extends State<ChatScreen> {
                 style: const TextStyle(fontSize: 16),
                 onChanged: (v) => setState(() => _searchQuery = v.trim()),
               )
-            : const Text('Ray & Aproo'),
+            : const Text('Raayyy & Aproo'),
         actions: [
           if (_searchActive)
             IconButton(
               icon: const Icon(Icons.close),
               onPressed: () {
-                setState(() {
-                  _searchActive = false;
-                  _searchQuery = '';
-                  _searchCtrl.clear();
-                });
+                _searchCtrl.clear();
+                setState(() => _searchQuery = '');
               },
             )
           else ...[
@@ -468,6 +488,10 @@ class _MessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isRead = message.readBy.length > 1;
+    final partnerReadTime = message.readTimes.entries
+        .where((e) => e.key != myUid)
+        .map((e) => e.value)
+        .firstOrNull;
     final hasReactions = message.reactions.isNotEmpty;
 
     return Padding(
@@ -610,6 +634,14 @@ class _MessageBubble extends StatelessWidget {
                             ? AppTheme.primary
                             : AppTheme.textMuted,
                       ),
+                      if (isRead && partnerReadTime != null) ...[
+                        const SizedBox(width: 4),
+                        Text(
+                          'Read ${DateFormat.jm().format(partnerReadTime)}',
+                          style: const TextStyle(
+                              color: AppTheme.textMuted, fontSize: 10),
+                        ),
+                      ],
                     ],
                   ],
                 ),
