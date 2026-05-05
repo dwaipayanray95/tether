@@ -33,8 +33,13 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   StreamSubscription? _incomingCallSub;
   bool _callScreenOpen = false;
 
+  /// Every callId that has been opened this session.
+  /// Once a callId is in this set no further CallScreens will open for it,
+  /// regardless of which trigger fires (Firestore stream, pendingCallId from
+  /// any notification path, warm-resume, etc).
+  final Set<String> _handledCallIds = {};
+
   /// Tracks the last time we pinged GitHub for an update.
-  /// Prevents hammering the API on rapid resume events.
   DateTime? _lastUpdateCheck;
 
   void _goToTab(int index) {
@@ -57,21 +62,27 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     });
   }
 
+  // ── Pending notification ──────────────────────────────────────────────────
+
+  /// Consumes pendingTab / pendingCallId set by NotificationService.
+  /// Safe to call multiple times — both fields are cleared before acting.
   void _handlePendingNotification() {
-    if (NotificationService.pendingTab != null) {
-      LogService.log('Handling pending tab: ${NotificationService.pendingTab}');
-      setState(() => _currentIndex = NotificationService.pendingTab!);
+    final tab = NotificationService.pendingTab;
+    if (tab != null) {
+      LogService.log('Handling pending tab: $tab');
       NotificationService.pendingTab = null;
+      setState(() => _currentIndex = tab);
     }
-    if (NotificationService.pendingCallId != null) {
-      final id = NotificationService.pendingCallId!;
-      LogService.log('Handling pending call ID: $id');
-      NotificationService.pendingCallId = null;
-      _openIncomingCallScreen(id);
+    final callId = NotificationService.pendingCallId;
+    if (callId != null) {
+      LogService.log('Handling pending call ID: $callId');
+      NotificationService.pendingCallId = null; // clear BEFORE opening
+      _openIncomingCallScreen(callId);
     }
   }
 
-  /// Checks for a new version at most once every 30 minutes.
+  // ── Update check ──────────────────────────────────────────────────────────
+
   void _checkForUpdate() {
     final now = DateTime.now();
     if (_lastUpdateCheck != null &&
@@ -85,27 +96,40 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     });
   }
 
+  // ── Incoming call stream ──────────────────────────────────────────────────
+
   void _listenIncomingCalls() {
     _incomingCallSub =
         CallService.incomingCallStream(_auth.myName).listen((doc) {
-      if (doc == null || _callScreenOpen) return;
-      
-      // If we just handled this callId via notification, skip the stream trigger
-      if (NotificationService.lastHandledCallId == doc.id) {
-        LogService.log('Call ${doc.id} already handled via notification, skipping stream trigger');
-        // Clear it after skipping so the next call with same ID (if any) can work
-        NotificationService.lastHandledCallId = null;
-        return;
-      }
-
-      final callId = doc.id;
-      LogService.log('INCOMING CALL detected via Firestore: $callId');
-      _openIncomingCallScreen(callId);
+      if (doc == null) return;
+      _openIncomingCallScreen(doc.id);
     });
   }
 
+  // ── Open incoming call screen ─────────────────────────────────────────────
+
+  /// Single, de-duplicated entry point for showing the incoming call UI.
+  ///
+  /// Uses [_handledCallIds] to ensure a given callId only ever opens ONE
+  /// CallScreen, regardless of how many triggers arrive (Firestore snapshot
+  /// re-emissions, stale pendingCallId from notification paths, lifecycle
+  /// resume events, etc.).
   void _openIncomingCallScreen(String callId) {
-    if (_callScreenOpen || !mounted) return;
+    if (!mounted) return;
+
+    if (_handledCallIds.contains(callId)) {
+      LogService.log('Call $callId already handled — skipping duplicate');
+      return;
+    }
+
+    if (_callScreenOpen) {
+      // Mark handled so it won't re-trigger after the current screen closes.
+      LogService.log('Call screen already open — marking $callId as handled');
+      _handledCallIds.add(callId);
+      return;
+    }
+
+    _handledCallIds.add(callId);
     LogService.log('Opening Incoming Call Screen: $callId');
     _callScreenOpen = true;
     Navigator.of(context)
@@ -135,6 +159,11 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       case AppLifecycleState.resumed:
         _firestore.updatePresence(_myPresenceKey, isOnline: true);
         _checkForUpdate();
+        // NotificationService sets pendingCallId/pendingTab from onMessageOpenedApp
+        // or the async getNotificationAppLaunchDetails callback — consume them here.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _handlePendingNotification();
+        });
         break;
       case AppLifecycleState.paused:
       case AppLifecycleState.detached:
@@ -148,27 +177,6 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    // Handle notification-triggered navigation on warm resume
-    if (NotificationService.pendingTab != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && NotificationService.pendingTab != null) {
-          LogService.log('Handling pending tab (warm): ${NotificationService.pendingTab}');
-          setState(() => _currentIndex = NotificationService.pendingTab!);
-          NotificationService.pendingTab = null;
-        }
-      });
-    }
-    if (NotificationService.pendingCallId != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && NotificationService.pendingCallId != null) {
-          final id = NotificationService.pendingCallId!;
-          LogService.log('Handling pending call ID (warm): $id');
-          NotificationService.pendingCallId = null;
-          _openIncomingCallScreen(id);
-        }
-      });
-    }
-
     final screens = [
       HomeScreen(
         onNavigate: _goToTab,

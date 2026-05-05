@@ -5,11 +5,20 @@ import 'screens/login_screen.dart';
 import 'screens/main_shell.dart';
 import 'services/notification_service.dart';
 import 'services/nav_service.dart';
+import 'services/log_service.dart';
 import 'theme/app_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
+  await LogService.init();
+  
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+    LogService.log('FLUTTER ERROR: ${details.exceptionAsString()}\n${details.stack}');
+  };
+
+  LogService.log('App started');
   runApp(const TetherApp());
 }
 
