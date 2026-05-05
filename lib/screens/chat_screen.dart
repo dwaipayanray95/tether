@@ -616,6 +616,14 @@ class _MessageBubble extends StatelessWidget {
     this.searchQuery = '',
   });
 
+  String _formatTimestamp(DateTime sentAt) {
+    final diff = DateTime.now().difference(sentAt);
+    if (diff.inMinutes < 60) {
+      return timeago.format(sentAt, locale: 'en_short');
+    }
+    return DateFormat.jm().format(sentAt);
+  }
+
   Widget _buildMessageText(String text, bool isMe) {
     final baseColor = isMe ? Colors.white : AppTheme.textDark;
     if (searchQuery.isEmpty) {
@@ -743,11 +751,52 @@ class _MessageBubble extends StatelessWidget {
                             ),
                           ),
                         _buildMessageText(message.text, isMe),
+                        // ── Timestamp + receipt inside the bubble ──────────
+                        const SizedBox(height: 4),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                _formatTimestamp(message.sentAt),
+                                style: TextStyle(
+                                  color: isMe
+                                      ? Colors.white.withValues(alpha: 0.6)
+                                      : AppTheme.textMuted,
+                                  fontSize: 10,
+                                ),
+                              ),
+                              if (isMe && showReceipt) ...[
+                                const SizedBox(width: 4),
+                                Icon(
+                                  isRead
+                                      ? Icons.done_all_rounded
+                                      : Icons.done_rounded,
+                                  size: 12,
+                                  color: isRead
+                                      ? Colors.white.withValues(alpha: 0.85)
+                                      : Colors.white.withValues(alpha: 0.45),
+                                ),
+                                if (isRead && partnerReadTime != null) ...[
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    'Read ${DateFormat.jm().format(partnerReadTime)}',
+                                    style: TextStyle(
+                                      color: Colors.white.withValues(alpha: 0.6),
+                                      fontSize: 10,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ],
+                          ),
+                        ),
                       ],
                     ),
                   ),
                 ),
-                // Reactions
+                // Reactions stay outside the bubble
                 if (hasReactions)
                   Padding(
                     padding: const EdgeInsets.only(top: 4),
@@ -780,36 +829,6 @@ class _MessageBubble extends StatelessWidget {
                       }).toList(),
                     ),
                   ),
-                const SizedBox(height: 3),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      timeago.format(message.sentAt, locale: 'en_short'),
-                      style: const TextStyle(
-                          color: AppTheme.textMuted, fontSize: 10),
-                    ),
-                    if (isMe && showReceipt) ...[
-                      const SizedBox(width: 4),
-                      Icon(
-                        isRead
-                            ? Icons.done_all_rounded
-                            : Icons.done_rounded,
-                        size: 14,
-                        color:
-                            isRead ? AppTheme.primary : AppTheme.textMuted,
-                      ),
-                      if (isRead && partnerReadTime != null) ...[
-                        const SizedBox(width: 4),
-                        Text(
-                          'Read ${DateFormat.jm().format(partnerReadTime)}',
-                          style: const TextStyle(
-                              color: AppTheme.textMuted, fontSize: 10),
-                        ),
-                      ],
-                    ],
-                  ],
-                ),
               ],
             ),
           ),
