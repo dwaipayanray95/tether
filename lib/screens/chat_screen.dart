@@ -12,6 +12,7 @@ import 'package:intl/intl.dart';
 import '../models/message_model.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
+import '../services/log_service.dart';
 import '../services/notification_service.dart';
 import '../theme/app_theme.dart';
 import 'call_screen.dart';
@@ -254,6 +255,7 @@ class ChatScreenState extends State<ChatScreen> {
   }
 
   void _startCall() {
+    LogService.log('Outgoing CALL initiated by user');
     Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => CallScreen(
         isOutgoing: true,
@@ -263,9 +265,11 @@ class ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _activateSearch() async {
+    LogService.log('Chat SEARCH activated');
     setState(() => _searchActive = true);
     // Eagerly load full message history for search
     if (_allMessages == null && !_loadingAllMessages) {
+      LogService.log('Fetching ALL messages for search index');
       setState(() => _loadingAllMessages = true);
       final all = await _firestore.getAllMessages(_coupleId);
       if (mounted) {
@@ -273,6 +277,7 @@ class ChatScreenState extends State<ChatScreen> {
           _allMessages = all;
           _loadingAllMessages = false;
         });
+        LogService.log('Search index ready: ${all.length} messages');
       }
     }
   }
@@ -310,7 +315,7 @@ class ChatScreenState extends State<ChatScreen> {
                 style: const TextStyle(fontSize: 16),
                 onChanged: (v) => setState(() => _searchQuery = v.trim()),
               )
-            : const Text('Ray & Aproo'),
+            : const Text('Raayyy & Aproo'),
         actions: [
           if (_searchActive)
             _loadingAllMessages
@@ -337,15 +342,6 @@ class ChatScreenState extends State<ChatScreen> {
             IconButton(
               icon: const Icon(Icons.call_rounded),
               onPressed: _startCall,
-            ),
-            Container(
-              margin: const EdgeInsets.only(right: 16),
-              width: 10,
-              height: 10,
-              decoration: const BoxDecoration(
-                color: Colors.green,
-                shape: BoxShape.circle,
-              ),
             ),
           ],
         ],
