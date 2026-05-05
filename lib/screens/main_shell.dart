@@ -12,6 +12,7 @@ import '../services/firestore_service.dart';
 import '../services/notification_service.dart';
 import '../services/auth_service.dart';
 import '../services/call_service.dart';
+import '../services/log_service.dart';
 
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
@@ -32,7 +33,14 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   StreamSubscription? _incomingCallSub;
   bool _callScreenOpen = false;
 
-  void _goToTab(int index) => setState(() => _currentIndex = index);
+  /// Tracks the last time we pinged GitHub for an update.
+  /// Prevents hammering the API on rapid resume events.
+  DateTime? _lastUpdateCheck;
+
+  void _goToTab(int index) {
+    LogService.log('Navigating to tab: $index');
+    setState(() => _currentIndex = index);
+  }
 
   @override
   void initState() {
@@ -42,24 +50,39 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // Handle notification-triggered navigation on cold start
       _handlePendingNotification();
-      Future.delayed(const Duration(seconds: 3), () {
-        if (mounted) UpdateDialog.checkAndShow(context);
-      });
       // Listen for incoming calls via Firestore
       _listenIncomingCalls();
+      // Check for update on launch
+      _checkForUpdate();
     });
   }
 
   void _handlePendingNotification() {
     if (NotificationService.pendingTab != null) {
+      LogService.log('Handling pending tab: ${NotificationService.pendingTab}');
       setState(() => _currentIndex = NotificationService.pendingTab!);
       NotificationService.pendingTab = null;
     }
     if (NotificationService.pendingCallId != null) {
       final id = NotificationService.pendingCallId!;
+      LogService.log('Handling pending call ID: $id');
       NotificationService.pendingCallId = null;
       _openIncomingCallScreen(id);
     }
+  }
+
+  /// Checks for a new version at most once every 30 minutes.
+  void _checkForUpdate() {
+    final now = DateTime.now();
+    if (_lastUpdateCheck != null &&
+        now.difference(_lastUpdateCheck!).inMinutes < 30) {
+      LogService.log('Update check skipped (checked recently)');
+      return;
+    }
+    _lastUpdateCheck = now;
+    Future.delayed(const Duration(seconds: 3), () {
+      if (mounted) UpdateDialog.checkAndShow(context);
+    });
   }
 
   void _listenIncomingCalls() {
@@ -67,12 +90,14 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         CallService.incomingCallStream(_auth.myName).listen((doc) {
       if (doc == null || _callScreenOpen) return;
       final callId = doc.id;
+      LogService.log('INCOMING CALL detected via Firestore: $callId');
       _openIncomingCallScreen(callId);
     });
   }
 
   void _openIncomingCallScreen(String callId) {
     if (_callScreenOpen || !mounted) return;
+    LogService.log('Opening Incoming Call Screen: $callId');
     _callScreenOpen = true;
     Navigator.of(context)
         .push(MaterialPageRoute(
@@ -96,9 +121,11 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    LogService.log('App lifecycle state changed: $state');
     switch (state) {
       case AppLifecycleState.resumed:
         _firestore.updatePresence(_myPresenceKey, isOnline: true);
+        _checkForUpdate();
         break;
       case AppLifecycleState.paused:
       case AppLifecycleState.detached:
@@ -116,6 +143,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     if (NotificationService.pendingTab != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && NotificationService.pendingTab != null) {
+          LogService.log('Handling pending tab (warm): ${NotificationService.pendingTab}');
           setState(() => _currentIndex = NotificationService.pendingTab!);
           NotificationService.pendingTab = null;
         }
@@ -125,6 +153,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && NotificationService.pendingCallId != null) {
           final id = NotificationService.pendingCallId!;
+          LogService.log('Handling pending call ID (warm): $id');
           NotificationService.pendingCallId = null;
           _openIncomingCallScreen(id);
         }
@@ -135,6 +164,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       HomeScreen(
         onNavigate: _goToTab,
         onSelectMessage: (id) {
+          LogService.log('Selected message from home: $id');
           setState(() => _currentIndex = 1);
           WidgetsBinding.instance.addPostFrameCallback((_) {
             _chatKey.currentState?.scrollToMessageById(id);
@@ -155,6 +185,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
             _chatKey.currentState?.isSearchActive == true) {
           _chatKey.currentState?.closeSearch();
         } else {
+          LogService.log('Back button pressed: returning to Home');
           setState(() => _currentIndex = 0);
         }
       },
