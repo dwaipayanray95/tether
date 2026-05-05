@@ -8,7 +8,7 @@ const List<String> allowedEmails = [
   'apoo.0404@gmail.com',      // Aproo
 ];
 
-const String coupleId = 'raayyy-aproo'; // shared ID for Firestore collections
+const String coupleId = 'ray-aproo'; // shared ID for Firestore collections
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -18,11 +18,11 @@ class AuthService {
   User? get currentUser => _auth.currentUser;
   Stream<User?> get authStateChanges => _auth.authStateChanges();
 
-  bool get isRaayyy =>
+  bool get isRay =>
       currentUser?.email?.toLowerCase() == allowedEmails[0].toLowerCase();
 
-  String get myName => isRaayyy ? 'Raayyy' : 'Aproo';
-  String get partnerName => isRaayyy ? 'Aproo' : 'Raayyy';
+  String get myName => isRay ? 'Ray' : 'Aproo';
+  String get partnerName => isRay ? 'Aproo' : 'Ray';
 
   // ── Google Sign-In ────────────────────────────────────────────────────────
 
@@ -83,7 +83,7 @@ class AuthService {
     if (!doc.exists) {
       final resolvedName = name ??
           (user.email?.toLowerCase() == allowedEmails[0].toLowerCase()
-              ? 'Raayyy'
+              ? 'Ray'
               : 'Aproo');
       await ref.set({
         'uid': user.uid,

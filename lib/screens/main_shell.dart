@@ -21,9 +21,9 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   final _chatKey = GlobalKey<ChatScreenState>();
   final _firestore = FirestoreService();
   final _auth = AuthService();
-  static const _coupleId = 'raayyy-aproo';
+  static const _coupleId = 'ray-aproo';
   String get _myUid => FirebaseAuth.instance.currentUser?.uid ?? '';
-  String get _myPresenceKey => _auth.isRaayyy ? 'raayyy' : 'aproo';
+  String get _myPresenceKey => _auth.isRay ? 'ray' : 'aproo';
 
   void _goToTab(int index) => setState(() => _currentIndex = index);
 

@@ -12,7 +12,7 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
   if (message.data['type'] == 'ping') {
     final auth = AuthService();
-    final myKey = auth.isRaayyy ? 'raayyy' : 'aproo';
+    final myKey = auth.isRay ? 'ray' : 'aproo';
     final pos = await LocationService.getCurrentPosition();
     if (pos != null) {
       await LocationService.forceUpload(pos, myKey, auth.myName);
@@ -68,7 +68,7 @@ class NotificationService {
       
       if (type == 'ping') {
         final auth = AuthService();
-        final myKey = auth.isRaayyy ? 'raayyy' : 'aproo';
+        final myKey = auth.isRay ? 'ray' : 'aproo';
         final pos = await LocationService.getCurrentPosition();
         if (pos != null) {
           await LocationService.forceUpload(pos, myKey, auth.myName);
@@ -150,12 +150,12 @@ class NotificationService {
         .doc(uid)
         .set({'fcmToken': token}, SetOptions(merge: true));
 
-    const raayyyEmail = 'dwaipayanray95@gmail.com';
+    const rayEmail = 'dwaipayanray95@gmail.com';
     final email = FirebaseAuth.instance.currentUser?.email ?? '';
-    final myName = email == raayyyEmail ? 'raayyy' : 'aproo';
+    final myName = email == rayEmail ? 'ray' : 'aproo';
     await FirebaseFirestore.instance
         .collection('couples')
-        .doc('raayyy-aproo')
+        .doc('ray-aproo')
         .collection('fcmTokens')
         .doc(myName)
         .set({'token': token});
