@@ -8,6 +8,7 @@ import 'package:timeago/timeago.dart' as timeago;
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
 import '../services/location_service.dart';
+import '../services/call_handler_service.dart';
 import '../theme/app_theme.dart';
 import 'settings_screen.dart';
 import 'search_screen.dart';
@@ -187,6 +188,19 @@ class _HomeScreenState extends State<HomeScreen>
     HapticFeedback.mediumImpact();
     
     await _firestore.sendPoke(coupleId, myUid, _auth.myName);
+  }
+
+  Future<void> _startCall() async {
+    final partnerUid = await _auth.getPartnerUid();
+    if (partnerUid != null) {
+      await CallHandlerService().makeCall(partnerUid, _auth.partnerName);
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not find partner to call.')),
+        );
+      }
+    }
   }
 
   @override
@@ -511,6 +525,8 @@ class _HomeScreenState extends State<HomeScreen>
             const SizedBox(width: 12),
             _actionTile(Icons.chat_bubble_outline_rounded, 'Chat',
                 () => widget.onNavigate(1)),
+            const SizedBox(width: 12),
+            _actionTile(Icons.call_rounded, 'Call', _startCall),
           ],
         ),
       ],

@@ -25,6 +25,19 @@ class AuthService {
   String get myName => isRay ? 'Ray' : 'Aproo';
   String get partnerName => isRay ? 'Aproo' : 'Ray';
 
+  Future<String?> getPartnerUid() async {
+    final partnerEmail = isRay ? allowedEmails[1] : allowedEmails[0];
+    final snap = await _db
+        .collection('users')
+        .where('email', isEqualTo: partnerEmail)
+        .limit(1)
+        .get();
+    if (snap.docs.isNotEmpty) {
+      return snap.docs.first.id;
+    }
+    return null;
+  }
+
   // ── Google Sign-In ────────────────────────────────────────────────────────
 
   Future<UserCredential?> signInWithGoogle() async {
