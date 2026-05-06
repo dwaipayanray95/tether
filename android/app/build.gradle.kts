@@ -40,7 +40,7 @@ android {
 
     defaultConfig {
         applicationId = "com.theawesomeray.tether"
-        minSdk = maxOf(flutter.minSdkVersion, 21) // opus_flutter_android NDK requires >= 21
+        minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName

@@ -79,23 +79,17 @@ class FcmService {
       final dio = Dio();
       final data = <String, String>{'type': type, ...?extra};
 
-      // Call notifications are data-only: the background handler shows a
-      // full-screen local notification instead of relying on FCM auto-display.
-      // call_ended is also data-only: it silently cancels the call notification.
-      final isCall = type == 'call' || type == 'call_ended';
       final messageBody = <String, dynamic>{
         'token': token,
         'data': data,
         'android': {'priority': 'high'},
+        'notification': {'title': title, 'body': body},
       };
-      if (!isCall) {
-        messageBody['notification'] = {'title': title, 'body': body};
-        (messageBody['android'] as Map)['notification'] = {
-          'channel_id': 'tether_default',
-          'default_sound': true,
-          'default_vibrate_timings': true,
-        };
-      }
+      (messageBody['android'] as Map)['notification'] = {
+        'channel_id': 'tether_default',
+        'default_sound': true,
+        'default_vibrate_timings': true,
+      };
 
       await dio.post(
         _fcmUrl,

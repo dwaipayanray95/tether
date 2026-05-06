@@ -11,7 +11,6 @@ import '../services/location_service.dart';
 import '../theme/app_theme.dart';
 import 'settings_screen.dart';
 import 'search_screen.dart';
-import 'call_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final void Function(int) onNavigate;
@@ -495,15 +494,6 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  void _startCall() {
-    Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => CallScreen(
-        isOutgoing: true,
-        partnerName: _auth.partnerName,
-      ),
-    ));
-  }
-
   Widget _buildQuickActions() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -521,10 +511,6 @@ class _HomeScreenState extends State<HomeScreen>
             const SizedBox(width: 12),
             _actionTile(Icons.chat_bubble_outline_rounded, 'Chat',
                 () => widget.onNavigate(1)),
-            const SizedBox(width: 12),
-            _actionTile(Icons.call_rounded, 'Call', _startCall,
-                iconColor: const Color(0xFF2E7D32),
-                backgroundColor: const Color(0xFFE8F5E9)),
           ],
         ),
       ],
