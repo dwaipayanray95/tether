@@ -1,5 +1,6 @@
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:flutter_callkit_incoming/entities/entities.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:uuid/uuid.dart';
 import 'signaling_service.dart';
 import 'webrtc_service.dart';
@@ -65,7 +66,7 @@ class CallHandlerService {
     _currentCallId = const Uuid().v4();
 
     await _webrtcService.initLocalStream();
-    await _webrtcService.createPeerConnection();
+    await _webrtcService.setupPeerConnection();
 
     _webrtcService.peerConnection!.onIceCandidate = (candidate) {
       _signalingService.sendIceCandidate(_remoteUserId!, candidate.toMap());
@@ -126,7 +127,7 @@ class CallHandlerService {
     if (_pendingOffer == null) return;
 
     await _webrtcService.initLocalStream();
-    await _webrtcService.createPeerConnection();
+    await _webrtcService.setupPeerConnection();
 
     _webrtcService.peerConnection!.onIceCandidate = (candidate) {
       _signalingService.sendIceCandidate(_remoteUserId!, candidate.toMap());
