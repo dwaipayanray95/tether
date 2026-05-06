@@ -35,10 +35,14 @@
 		<key>PreciseLocation</key>
 		<string>Tether needs precise location for accurate distance calculations.</string>
 	</dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Tether needs access to the microphone for voice calls.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>
 		<string>remote-notification</string>
+		<string>voip</string>
+		<string>audio</string>
 	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
