@@ -1,6 +1,7 @@
 package com.theawesomeray.tether
 
 import android.content.Context
+import android.media.AudioManager
 import android.os.PowerManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -23,6 +24,12 @@ class MainActivity : FlutterActivity() {
                     }
                     "release" -> {
                         releaseProximityWakeLock()
+                        result.success(null)
+                    }
+                    "setSpeakerOn" -> {
+                        val on = call.arguments as? Boolean ?: false
+                        val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                        am.isSpeakerphoneOn = on
                         result.success(null)
                     }
                     else -> result.notImplemented()

@@ -28,6 +28,18 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     return;
   }
 
+  if (type == 'call_ended') {
+    final callId = message.data['callId'] as String?;
+    if (callId == null) return;
+    final local = FlutterLocalNotificationsPlugin();
+    await local.initialize(const InitializationSettings(
+      android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+    ));
+    await local.cancel(callId.hashCode);
+    LogService.log('Background: cancelled call notification for $callId');
+    return;
+  }
+
   if (type == 'call') {
     final callId = message.data['callId'] as String?;
     final callerName =
@@ -63,7 +75,6 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
           category: AndroidNotificationCategory.call,
           playSound: true,
           enableVibration: true,
-          ongoing: true,
           autoCancel: false,
           timeoutAfter: 60000, // dismiss after 60 s if unanswered
           icon: '@mipmap/ic_launcher',
@@ -168,6 +179,13 @@ class NotificationService {
       // Calls in foreground are handled by the Firestore real-time stream in
       // MainShell — skip showing a notification so there's no duplicate.
       if (type == 'call') return;
+
+      // Cancel the incoming call notification when the caller hangs up.
+      if (type == 'call_ended') {
+        final callId = message.data['callId'] as String?;
+        if (callId != null) await _local.cancel(callId.hashCode);
+        return;
+      }
 
       // Suppress chat banner if user is already in chat
       if (type == 'chat' && chatIsOpen) return;

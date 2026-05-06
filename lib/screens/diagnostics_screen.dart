@@ -86,7 +86,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
           child: const Icon(Icons.bug_report_outlined,
               color: AppTheme.primary, size: 20),
         ),
-        activeColor: AppTheme.primary,
+        activeThumbColor: AppTheme.primary,
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       ),

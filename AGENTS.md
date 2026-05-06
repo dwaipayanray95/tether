@@ -1,7 +1,7 @@
 # Tether — AI Agent Reference
 
 Private couples app for **Raayyy (Ray)** and **Aproo**.  
-Flutter · Android · Firebase · WebRTC  
+Flutter · Android · Firebase (Firestore + RTDB) · Opus audio relay  
 Package: `com.theawesomeray.tether`
 
 ---
@@ -23,7 +23,7 @@ Package: `com.theawesomeray.tether`
 
 ```
 lib/
-├── main.dart                    # App entry point, Firebase init, auth gate
+├── main.dart                    # App entry point: Firebase init, initOpus (Opus FFI load), auth gate
 ├── config/
 │   └── notification_config.dart # FCM service account credentials (private)
 ├── models/
@@ -45,10 +45,10 @@ lib/
 ├── services/
 │   ├── auth_service.dart        # Firebase Auth + Google Sign-In; isRay, myName, partnerName
 │   ├── firestore_service.dart   # All Firestore reads/writes (messages, todos, presence, poke, unread)
-│   ├── call_service.dart        # WebRTC signalling via Firestore (offer/answer/candidates/status)
+│   ├── call_service.dart        # Firestore call signalling (status only — no SDP/ICE)
+│   ├── audio_relay_service.dart # Bidirectional voice via Firebase RTDB + Opus FFI encode/decode
 │   ├── fcm_service.dart         # Sends FCM via HTTP v1 API with service-account JWT (no Cloud Functions)
 │   ├── notification_service.dart# FCM receive handling, local notifications, full-screen call alert
-│   ├── webrtc_service.dart      # RTCPeerConnection wrapper (audio only, STUN+TURN, ICE queuing)
 │   ├── proximity_service.dart   # Android PROXIMITY_SCREEN_OFF_WAKE_LOCK via MethodChannel
 │   ├── location_service.dart    # Geolocator + Firestore location upload/stream
 │   ├── update_service.dart      # GitHub Releases API check + APK download & install
@@ -64,6 +64,8 @@ lib/
 android/
 └── app/src/main/kotlin/com/theawesomeray/tether/
     └── MainActivity.kt          # MethodChannel 'com.theawesomeray.tether/proximity'
+                                 # Methods: acquire, release (proximity wake lock)
+                                 #          setSpeakerOn(bool) (AudioManager speaker routing)
 ```
 
 ---
@@ -78,10 +80,8 @@ couples/ray-aproo/
   │     text, fromUid, fromName, sentAt, readBy[], readTimes{uid→ts},
   │     reactions{emoji→[uid]}, replyToId?, replyToText?, imageUrl?
   ├── calls/{callId}
-  │     callerName, status ('ringing'|'active'|'ended'), offer{sdp,type},
-  │     answer{sdp,type}, createdAt
-  │     ├── callerCandidates/{id}   candidate, sdpMid, sdpMLineIndex
-  │     └── calleeCandidates/{id}   candidate, sdpMid, sdpMLineIndex
+  │     callerName, status ('ringing'|'active'|'ended'), createdAt
+  │     (no SDP, no ICE candidates — audio goes via RTDB, not WebRTC)
   ├── todos/{todoId}
   │     title, done, createdBy, createdAt, comments[]
   ├── pokes/status
@@ -92,6 +92,63 @@ couples/ray-aproo/
   └── presence
         ray   { isOnline, lastSeen }
         aproo { isOnline, lastSeen }
+```
+
+---
+
+## Firebase Realtime Database Schema
+
+Audio data for active calls. Deleted automatically when call ends.
+
+```
+audio_relay/
+  {callId}/
+    ray/
+      chunks/{pushId}
+        d:  base64-encoded Opus packet (20ms frame, VoIP mode, 16kHz mono)
+        ts: server timestamp
+    aproo/
+      chunks/{pushId}
+        d:  base64-encoded Opus packet
+        ts: server timestamp
+```
+
+- Each push key is chronologically sortable → `onChildAdded` delivers in order
+- Deleted on `stop()` via `_db.ref('audio_relay/$callId').remove()`
+
+---
+
+## Audio Relay Call Architecture
+
+```
+Caller (Ray)                           Callee (Aproo)
+────────────                           ──────────────
+CallService.startCall()
+  └─► Firestore calls/{id}
+        callerName, status:'ringing'
+        FcmService.send(type:'call')
+                                       FCM received (background)
+                                       → full-screen local notification
+                                       User taps → app opens
+                                       MainShell._openIncomingCallScreen()
+                                       CallScreen shows (incomingRing state)
+                                       User taps Accept
+                                       CallService.acceptCall()
+                                         → status:'active'
+
+status:'active' seen by caller
+AudioRelayService.start(callId, 'ray', 'aproo')
+  → recorder → PCM16 → Opus encode    AudioRelayService.start(callId, 'aproo', 'ray')
+  → base64 → RTDB push                  → recorder → PCM16 → Opus encode
+                                          → base64 → RTDB push
+
+RTDB onChildAdded (aproo/chunks)      RTDB onChildAdded (ray/chunks)
+→ Opus decode → PCM16                 → Opus decode → PCM16
+→ feedFromStream → speaker            → feedFromStream → speaker
+
+Hang up: CallService.endCall()        Firestore status:'ended'
+         FcmService.send(call_ended)  → CallScreen._hangUp(remote:true)
+         RTDB audio_relay removed
 ```
 
 ---
@@ -116,18 +173,22 @@ couples/ray-aproo/
 | Change | Files |
 |--------|-------|
 | Call UI (accept/decline/mute/speaker) | `call_screen.dart` |
-| Ringtone | `call_screen.dart` → `_startRingtone()` / `_stopRingtone()` (uses `flutter_ringtone_player`) |
-| WebRTC peer connection setup | `webrtc_service.dart` → `init()` |
-| ICE / STUN / TURN servers | `webrtc_service.dart` → `_iceServers` const |
-| ICE candidate pool pre-gather | `webrtc_service.dart` → `'iceCandidatePoolSize'` in `_iceServers` |
-| Firestore signalling (offer/answer/candidates) | `call_service.dart` |
-| Outgoing call flow | `call_screen.dart` → `_startOutgoing()` |
-| Incoming call flow | `call_screen.dart` → `_answerIncoming()` |
+| Ringtone (incoming ring) | `call_screen.dart` → `_startRingtone()` / `_stopRingtone()` (uses `flutter_ringtone_player`) |
+| Audio relay start/stop | `audio_relay_service.dart` → `start()` / `stop()` |
+| Audio codec (Opus, 20ms frames, VoIP mode) | `audio_relay_service.dart` — uses `opus_dart` `StreamOpusEncoder/Decoder` |
+| Audio bitrate / frame size | `audio_relay_service.dart` → `StreamOpusEncoder.bytes(frameTime: FrameTime.ms20, ...)` |
+| Speaker / earpiece routing | `audio_relay_service.dart` → `setSpeakerOn()` → MethodChannel → `MainActivity.kt` → `AudioManager.isSpeakerphoneOn` |
+| Mute | `audio_relay_service.dart` → `setMuted()` — stops RTDB writes but keeps encoding |
+| RTDB audio data path | `audio_relay_service.dart` → `_db.ref('audio_relay/$callId/$key/chunks')` |
+| Firestore call signalling | `call_service.dart` — `startCall()`, `acceptCall()`, `endCall()`, `callStatusStream()` |
+| Outgoing call flow | `call_screen.dart` → `_start()` (isOutgoing path) + `_watchCallStatus()` |
+| Incoming call flow | `call_screen.dart` → `_start()` (incoming path) + `_acceptCall()` |
 | Incoming call detection (foreground) | `main_shell.dart` → `_listenIncomingCalls()` via `CallService.incomingCallStream()` |
-| Speaker / earpiece routing | `webrtc_service.dart` → `setSpeakerOn()` → `Helper.setSpeakerphoneOn()` |
 | Proximity sensor (screen off on ear) | `proximity_service.dart` + `MainActivity.kt` |
 | Full-screen call notification (background/locked) | `notification_service.dart` → `firebaseMessagingBackgroundHandler` |
-| Call FCM send | `call_service.dart` → `startCall()` → `FcmService.send(type: 'call', ...)` |
+| Lock screen display of notification | `android/app/src/main/AndroidManifest.xml` → `showWhenLocked` + `turnScreenOn` on MainActivity |
+| Call FCM send | `call_service.dart` → `startCall()` → `FcmService.send(type:'call', ...)` |
+| Call-ended FCM (dismiss partner notification) | `call_screen.dart` → `_hangUp()` → `FcmService.send(type:'call_ended', ...)` |
 
 ### 🏠 Home Screen
 | Change | Files |
@@ -187,12 +248,18 @@ AuthService().myName      // 'Ray' or 'Aproo'  (capital first letter)
 AuthService().partnerName // opposite of myName
 
 // Presence / FCM token keys (lowercase)
-'ray'   // Ray's key in Firestore presence + fcmTokens
+'ray'   // Ray's key in Firestore presence + fcmTokens + RTDB audio paths
 'aproo' // Aproo's key
 
 // Notification channels
-'tether_updates_v1'  // default channel
-'tether_calls_v1'    // incoming call channel (max importance)
+'tether_updates_v1'  // default channel (messages, pokes, todos)
+'tether_calls_v1'    // incoming call channel (max importance, fullScreenIntent)
+
+// Audio relay RTDB path
+'audio_relay/{callId}/{ray|aproo}/chunks'  // Opus packets during active calls
+
+// MethodChannel
+'com.theawesomeray.tether/proximity'  // acquire, release, setSpeakerOn
 ```
 
 ---
@@ -214,51 +281,30 @@ Fonts: **DM Sans** (body), **Playfair Display** (headings, hero text).
 
 ---
 
-## Android Native
+## Android Native (`MainActivity.kt`)
 
-**`MainActivity.kt`** — minimal; only contains one MethodChannel:
-- Channel name: `com.theawesomeray.tether/proximity`
-- Methods: `acquire` / `release` → manages `PROXIMITY_SCREEN_OFF_WAKE_LOCK`
-- Called by `ProximityService` in Dart when `CallScreen` opens/closes
+Single MethodChannel: `com.theawesomeray.tether/proximity`
+
+| Method | Argument | What it does |
+|--------|----------|--------------|
+| `acquire` | — | Acquires `PROXIMITY_SCREEN_OFF_WAKE_LOCK` (screen dims on ear) |
+| `release` | — | Releases the proximity wake lock |
+| `setSpeakerOn` | `Boolean` | Sets `AudioManager.isSpeakerphoneOn` for call speaker routing |
+
+Called by `ProximityService` (acquire/release) and `AudioRelayService.setSpeakerOn()`.
 
 If you need another platform channel, add it to `MainActivity.kt` following the same pattern.
-
----
-
-## WebRTC Call Architecture
-
-```
-Caller (offerer)                     Callee (answerer)
-─────────────────                    ──────────────────
-createOffer()
-  └─► Firestore calls/{id}
-        offer + status:'ringing'
-                                     FCM wakes device
-                                     _listenIncomingCalls() fires
-                                     CallScreen opens (incomingRing state)
-                                     onIceCandidate listener attached ← BEFORE setRemoteDescription
-                                     setRemoteDescription(offer)
-                                     createAnswer()
-                                     answerCall() → writes answer + status:'active'
-                                                  → listens callerCandidates
-
-onAnswer() fires                     calleeCandidates listener fires
-setRemoteDescription(answer)         addIceCandidate(callerCandidate)
-ICE queue flushed                    ──────────────────────────────
-addIceCandidate(calleeCandidate)     RTCPeerConnectionStateConnected ✅
-```
-
-**TURN servers** (`webrtc_service.dart` → `_iceServers`): `openrelay.metered.ca` port 80/443/tcp.  
-`iceCandidatePoolSize: 2` pre-gathers relay candidates before negotiation to prevent timing failures.
 
 ---
 
 ## FCM Send Rules
 
 - **All notification sends go through `FcmService.send()`** — never call the FCM API directly
-- `type: 'call'` → **data-only** (no `notification` field) — background handler shows full-screen local notification
+- `type: 'call'` → **data-only** — background handler shows full-screen local notification
+- `type: 'call_ended'` → **data-only** — background/foreground handler cancels the call notification by ID (`callId.hashCode`)
 - `type: 'chat'|'poke'|'todo'` → includes `notification` field for auto-display
-- Partner name for FCM routing: `callerName == 'Ray' ? 'aproo' : 'ray'`
+- `type: 'ping'` → data-only — triggers partner location upload
+- Partner name for FCM routing: `AuthService().partnerName.toLowerCase()` → `'ray'` or `'aproo'`
 - FCM tokens stored at: `couples/ray-aproo/fcmTokens/{ray|aproo}/token`
 
 ---
@@ -267,4 +313,6 @@ addIceCandidate(calleeCandidate)     RTCPeerConnectionStateConnected ✅
 
 `LogService.log(message)` — writes to file only when logging is enabled in Settings → Diagnostics.  
 Add log calls for any significant state change, network call, or user action.  
-**Do not log sensitive data** (tokens, passwords, full SDP strings).
+**Do not log sensitive data** (tokens, passwords).
+
+Audio relay logs use the `[AudioRelay]` prefix for easy filtering in Diagnostics.

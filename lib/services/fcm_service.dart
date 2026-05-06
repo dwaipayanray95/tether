@@ -81,7 +81,8 @@ class FcmService {
 
       // Call notifications are data-only: the background handler shows a
       // full-screen local notification instead of relying on FCM auto-display.
-      final isCall = type == 'call';
+      // call_ended is also data-only: it silently cancels the call notification.
+      final isCall = type == 'call' || type == 'call_ended';
       final messageBody = <String, dynamic>{
         'token': token,
         'data': data,
