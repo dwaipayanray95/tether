@@ -14,7 +14,7 @@ class WebRTCService {
     _localStream = await navigator.mediaDevices.getUserMedia(WebRTCConfig.mediaConstraints);
   }
 
-  Future<void> createPeerConnection() async {
+  Future<void> setupPeerConnection() async {
     _peerConnection = await createPeerConnection(
       {
         'iceServers': WebRTCConfig.iceServers,
@@ -62,7 +62,7 @@ class WebRTCService {
   }
 
   Future<void> addIceCandidate(RTCIceCandidate candidate) async {
-    await _peerConnection!.addIceCandidate(candidate);
+    await _peerConnection!.addCandidate(candidate);
   }
 
   void toggleMute(bool isMuted) {
