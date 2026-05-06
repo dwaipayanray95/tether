@@ -4,7 +4,7 @@ import * as functions from "firebase-functions";
 admin.initializeApp();
 
 const db = admin.firestore();
-const COUPLE_ID = "raayyy-aproo";
+const COUPLE_ID = "ray-aproo";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -31,7 +31,7 @@ async function notify(token: string, title: string, body: string): Promise<void>
       android: {
         priority: "high",
         notification: {
-          channelId: "tether_default",
+          channelId: "tether_updates_v1",
           color: "#E8715A",
           sound: "default",
         },
@@ -39,6 +39,30 @@ async function notify(token: string, title: string, body: string): Promise<void>
     });
   } catch (err) {
     functions.logger.error("FCM send failed", err);
+  }
+}
+
+async function notifyCall(token: string, callerName: string): Promise<void> {
+  try {
+    await admin.messaging().send({
+      token,
+      data: {
+        type: "call_ping",
+        callerName: callerName,
+      },
+      android: {
+        priority: "high",
+      },
+      apns: {
+        payload: {
+          aps: {
+            contentAvailable: true,
+          },
+        },
+      },
+    });
+  } catch (err) {
+    functions.logger.error("FCM call ping failed", err);
   }
 }
 
@@ -112,4 +136,15 @@ export const onNewComment = functions.firestore
       `Note on "${todoTitle}"`,
       `${data.authorName}: ${data.text}`
     );
+  });
+
+// ── New call ping ────────────────────────────────────────────────────────────
+
+export const onNewCallPing = functions.firestore
+  .document(`couples/${COUPLE_ID}/call_pings/{pingId}`)
+  .onCreate(async (snap) => {
+    const data = snap.data();
+    const token = await getPartnerToken(data.callerUid);
+    if (!token) return;
+    await notifyCall(token, data.callerName as string);
   });
