@@ -15,7 +15,6 @@ import '../services/firestore_service.dart';
 import '../services/log_service.dart';
 import '../services/notification_service.dart';
 import '../theme/app_theme.dart';
-import 'call_screen.dart';
 
 const _reactionEmojis = [
   '❤️', '😂', '😍', '👍', '💃', '🥳',
@@ -254,16 +253,6 @@ class ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  void _startCall() {
-    LogService.log('Outgoing CALL initiated by user');
-    Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => CallScreen(
-        isOutgoing: true,
-        partnerName: _auth.partnerName,
-      ),
-    ));
-  }
-
   Future<void> _activateSearch() async {
     LogService.log('Chat SEARCH activated');
     setState(() => _searchActive = true);
@@ -338,10 +327,6 @@ class ChatScreenState extends State<ChatScreen> {
             IconButton(
               icon: const Icon(Icons.search_rounded),
               onPressed: _activateSearch,
-            ),
-            IconButton(
-              icon: const Icon(Icons.call_rounded),
-              onPressed: _startCall,
             ),
           ],
         ],

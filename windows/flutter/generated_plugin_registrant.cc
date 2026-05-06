@@ -12,9 +12,7 @@
 #include <firebase_core/firebase_core_plugin_c_api.h>
 #include <firebase_database/firebase_database_plugin_c_api.h>
 #include <firebase_storage/firebase_storage_plugin_c_api.h>
-#include <flutter_sound/flutter_sound_plugin_c_api.h>
 #include <geolocator_windows/geolocator_windows.h>
-#include <opus_flutter_windows/none.h>
 #include <permission_handler_windows/permission_handler_windows_plugin.h>
 
 void RegisterPlugins(flutter::PluginRegistry* registry) {
@@ -30,12 +28,8 @@ void RegisterPlugins(flutter::PluginRegistry* registry) {
       registry->GetRegistrarForPlugin("FirebaseDatabasePluginCApi"));
   FirebaseStoragePluginCApiRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("FirebaseStoragePluginCApi"));
-  FlutterSoundPluginCApiRegisterWithRegistrar(
-      registry->GetRegistrarForPlugin("FlutterSoundPluginCApi"));
   GeolocatorWindowsRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("GeolocatorWindows"));
-  noneRegisterWithRegistrar(
-      registry->GetRegistrarForPlugin("none"));
   PermissionHandlerWindowsPluginRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("PermissionHandlerWindowsPlugin"));
 }

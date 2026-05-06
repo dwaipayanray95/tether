@@ -28,61 +28,6 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     return;
   }
 
-  if (type == 'call_ended') {
-    final callId = message.data['callId'] as String?;
-    if (callId == null) return;
-    final local = FlutterLocalNotificationsPlugin();
-    await local.initialize(const InitializationSettings(
-      android: AndroidInitializationSettings('@mipmap/ic_launcher'),
-    ));
-    await local.cancel(callId.hashCode);
-    LogService.log('Background: cancelled call notification for $callId');
-    return;
-  }
-
-  if (type == 'call') {
-    final callId = message.data['callId'] as String?;
-    final callerName =
-        message.data['callerName'] as String? ?? 'Your partner';
-    if (callId == null) return;
-
-    // Initialise local notifications in this background isolate
-    final local = FlutterLocalNotificationsPlugin();
-    await local
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(NotificationService._callChannel);
-    await local.initialize(
-      const InitializationSettings(
-        android: AndroidInitializationSettings('@mipmap/ic_launcher'),
-      ),
-    );
-
-    LogService.log('Showing full-screen call notification for: $callId');
-    await local.show(
-      callId.hashCode,
-      '📞 $callerName is calling…',
-      'Tap to answer',
-      NotificationDetails(
-        android: AndroidNotificationDetails(
-          NotificationService._callChannel.id,
-          NotificationService._callChannel.name,
-          channelDescription:
-              NotificationService._callChannel.description,
-          importance: Importance.max,
-          priority: Priority.max,
-          fullScreenIntent: true,
-          category: AndroidNotificationCategory.call,
-          playSound: true,
-          enableVibration: true,
-          autoCancel: false,
-          timeoutAfter: 60000, // dismiss after 60 s if unanswered
-          icon: '@mipmap/ic_launcher',
-        ),
-      ),
-      payload: jsonEncode({'type': 'call', 'callId': callId}),
-    );
-  }
 }
 
 // ── NotificationService ───────────────────────────────────────────────────────
@@ -102,22 +47,11 @@ class NotificationService {
     enableVibration: true,
   );
 
-  // Call channel — max importance so fullScreenIntent works
-  static const _callChannel = AndroidNotificationChannel(
-    'tether_calls_v1',
-    'Incoming Calls',
-    description: 'Incoming voice calls from your partner',
-    importance: Importance.max,
-    playSound: true,
-    enableVibration: true,
-  );
-
   // Set to true by ChatScreen while it is mounted and visible
   static bool chatIsOpen = false;
 
   // ── Pending navigation set before MainShell reads them ───────────────────
   static int? pendingTab;
-  static String? pendingCallId;
 
   // ── init ─────────────────────────────────────────────────────────────────
 
@@ -131,7 +65,6 @@ class NotificationService {
     final androidPlugin = _local.resolvePlatformSpecificImplementation<
         AndroidFlutterLocalNotificationsPlugin>();
     await androidPlugin?.createNotificationChannel(_defaultChannel);
-    await androidPlugin?.createNotificationChannel(_callChannel);
 
     // Initialise local notifications
     await _local.initialize(
@@ -173,17 +106,6 @@ class NotificationService {
         if (pos != null) {
           await LocationService.forceUpload(pos, myKey, auth.myName);
         }
-        return;
-      }
-
-      // Calls in foreground are handled by the Firestore real-time stream in
-      // MainShell — skip showing a notification so there's no duplicate.
-      if (type == 'call') return;
-
-      // Cancel the incoming call notification when the caller hangs up.
-      if (type == 'call_ended') {
-        final callId = message.data['callId'] as String?;
-        if (callId != null) await _local.cancel(callId.hashCode);
         return;
       }
 
@@ -229,11 +151,6 @@ class NotificationService {
 
       if (type == 'chat') {
         pendingTab = 1;
-      } else if (type == 'call') {
-        final callId = data['callId'] as String?;
-        if (callId != null) {
-          pendingCallId = callId;
-        }
       }
     } catch (e) {
       LogService.log('Error parsing notification payload: $e');

@@ -5,13 +5,11 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'home_screen.dart';
 import 'chat_screen.dart';
 import 'todo_screen.dart';
-import 'call_screen.dart';
 import '../theme/app_theme.dart';
 import '../widgets/update_dialog.dart';
 import '../services/firestore_service.dart';
 import '../services/notification_service.dart';
 import '../services/auth_service.dart';
-import '../services/call_service.dart';
 import '../services/log_service.dart';
 
 class MainShell extends StatefulWidget {
@@ -30,15 +28,6 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   String get _myUid => FirebaseAuth.instance.currentUser?.uid ?? '';
   String get _myPresenceKey => _auth.isRay ? 'ray' : 'aproo';
 
-  StreamSubscription? _incomingCallSub;
-  bool _callScreenOpen = false;
-
-  /// Every callId that has been opened this session.
-  /// Once a callId is in this set no further CallScreens will open for it,
-  /// regardless of which trigger fires (Firestore stream, pendingCallId from
-  /// any notification path, warm-resume, etc).
-  final Set<String> _handledCallIds = {};
-
   /// Tracks the last time we pinged GitHub for an update.
   DateTime? _lastUpdateCheck;
 
@@ -55,8 +44,6 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // Handle notification-triggered navigation on cold start
       _handlePendingNotification();
-      // Listen for incoming calls via Firestore
-      _listenIncomingCalls();
       // Check for update on launch
       _checkForUpdate();
     });
@@ -64,20 +51,14 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
 
   // ── Pending notification ──────────────────────────────────────────────────
 
-  /// Consumes pendingTab / pendingCallId set by NotificationService.
-  /// Safe to call multiple times — both fields are cleared before acting.
+  /// Consumes pendingTab set by NotificationService.
+  /// Safe to call multiple times — field is cleared before acting.
   void _handlePendingNotification() {
     final tab = NotificationService.pendingTab;
     if (tab != null) {
       LogService.log('Handling pending tab: $tab');
       NotificationService.pendingTab = null;
       setState(() => _currentIndex = tab);
-    }
-    final callId = NotificationService.pendingCallId;
-    if (callId != null) {
-      LogService.log('Handling pending call ID: $callId');
-      NotificationService.pendingCallId = null; // clear BEFORE opening
-      _openIncomingCallScreen(callId);
     }
   }
 
@@ -96,59 +77,9 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     });
   }
 
-  // ── Incoming call stream ──────────────────────────────────────────────────
-
-  void _listenIncomingCalls() {
-    _incomingCallSub =
-        CallService.incomingCallStream(_auth.myName).listen((doc) {
-      if (doc == null) return;
-      _openIncomingCallScreen(doc.id);
-    });
-  }
-
-  // ── Open incoming call screen ─────────────────────────────────────────────
-
-  /// Single, de-duplicated entry point for showing the incoming call UI.
-  ///
-  /// Uses [_handledCallIds] to ensure a given callId only ever opens ONE
-  /// CallScreen, regardless of how many triggers arrive (Firestore snapshot
-  /// re-emissions, stale pendingCallId from notification paths, lifecycle
-  /// resume events, etc.).
-  void _openIncomingCallScreen(String callId) {
-    if (!mounted) return;
-
-    if (_handledCallIds.contains(callId)) {
-      LogService.log('Call $callId already handled — skipping duplicate');
-      return;
-    }
-
-    if (_callScreenOpen) {
-      // Mark handled so it won't re-trigger after the current screen closes.
-      LogService.log('Call screen already open — marking $callId as handled');
-      _handledCallIds.add(callId);
-      return;
-    }
-
-    _handledCallIds.add(callId);
-    LogService.log('Opening Incoming Call Screen: $callId');
-    _callScreenOpen = true;
-    Navigator.of(context)
-        .push(MaterialPageRoute(
-      builder: (_) => CallScreen(
-        isOutgoing: false,
-        partnerName: _auth.partnerName,
-        callId: callId,
-      ),
-    ))
-        .then((_) {
-      _callScreenOpen = false;
-    });
-  }
-
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _incomingCallSub?.cancel();
     super.dispose();
   }
 

@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:opus_dart/opus_dart.dart';
-import 'package:opus_flutter/opus_flutter.dart' as opus_flutter;
 import 'screens/login_screen.dart';
 import 'screens/main_shell.dart';
 import 'services/notification_service.dart';
@@ -14,8 +12,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
   await LogService.init();
-  initOpus(await opus_flutter.load()); // Load native Opus library for audio encoding
-  
+
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
     LogService.log('FLUTTER ERROR: ${details.exceptionAsString()}\n${details.stack}');
