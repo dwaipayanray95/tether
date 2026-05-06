@@ -6,6 +6,7 @@ import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
 import '../services/auth_service.dart';
 import '../services/call_service.dart';
 import '../services/audio_relay_service.dart';
+import '../services/fcm_service.dart';
 import '../services/proximity_service.dart';
 import '../services/log_service.dart';
 import '../theme/app_theme.dart';
@@ -170,6 +171,14 @@ class _CallScreenState extends State<CallScreen> {
     final idToEnd = _callId ?? widget.callId;
     if (idToEnd != null && !remote) {
       await CallService.endCall(idToEnd);
+      // Tell partner's device to dismiss its incoming call notification
+      FcmService.send(
+        partnerName: widget.partnerName.toLowerCase(),
+        title: '',
+        body: '',
+        type: 'call_ended',
+        extra: {'callId': idToEnd},
+      );
     }
     
     await _relay.stop();
