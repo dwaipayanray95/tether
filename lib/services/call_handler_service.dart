@@ -1,6 +1,7 @@
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:flutter_callkit_incoming/entities/entities.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:uuid/uuid.dart';
 import 'signaling_service.dart';
 import 'webrtc_service.dart';
@@ -15,25 +16,35 @@ class CallHandlerService {
   factory CallHandlerService() => _instance;
   CallHandlerService._internal();
 
-  late SignalingService _signalingService;
+  SignalingService? _signalingService;
   late WebRTCService _webrtcService;
   final AuthService _authService = AuthService();
+  bool _isInitialized = false;
   
   String? _currentCallId;
   String? _remoteUserId;
 
   void initialize() {
+    if (_isInitialized) return;
     final user = _authService.currentUser;
     if (user == null) return;
 
     _signalingService = SignalingService(userId: user.uid);
     _webrtcService = WebRTCService();
 
-    _signalingService.onOffer = _handleIncomingOffer;
-    _signalingService.onAnswer = _handleAnswer;
-    _signalingService.onIceCandidate = _handleIceCandidate;
+    _signalingService!.onOffer = _handleIncomingOffer;
+    _signalingService!.onAnswer = _handleAnswer;
+    _signalingService!.onIceCandidate = _handleIceCandidate;
+    
+    _signalingService!.onUserJoined = (joinedUserId) {
+      if (joinedUserId == _remoteUserId && _isMakingOutgoingCall) {
+        _isMakingOutgoingCall = false;
+        _sendWebRTCOffer();
+      }
+    };
 
-    _signalingService.connect();
+    _signalingService!.connect();
+    _isInitialized = true;
 
     // Listen to CallKit events
     FlutterCallkitIncoming.onEvent.listen((event) {
@@ -61,43 +72,63 @@ class CallHandlerService {
 
   // ── Outgoing Call ─────────────────────────────────────────────────────────
 
+  bool _isMakingOutgoingCall = false;
+
   Future<void> makeCall(String targetUserId, String targetUserName) async {
     _remoteUserId = targetUserId;
     _currentCallId = const Uuid().v4();
+    _isMakingOutgoingCall = true;
 
+    // 1. Send FCM Ping via Firestore to wake the partner
+    await FirebaseFirestore.instance
+        .collection('couples')
+        .doc('ray-aproo')
+        .collection('call_pings')
+        .add({
+      'callerUid': _authService.currentUser!.uid,
+      'callerName': _authService.myName,
+      'timestamp': FieldValue.serverTimestamp(),
+    });
+
+    // 2. Prepare WebRTC locally
     await _webrtcService.initLocalStream();
+
+    // 3. Wait for partner to join the signaling server (triggered by FCM)
+    // The actual offer will be sent in _signalingService.onUserJoined callback
+    LogService.log('Call Ping sent. Waiting for partner to join signaling...');
+
+    // Navigate to Call Screen immediately to show "Calling..."
+    _navigateToCallScreen(targetUserName, isOutgoing: true);
+  }
+
+  Future<void> _sendWebRTCOffer() async {
+    LogService.log('Partner joined. Sending WebRTC Offer...');
     await _webrtcService.setupPeerConnection();
 
     _webrtcService.peerConnection!.onIceCandidate = (candidate) {
-      _signalingService.sendIceCandidate(_remoteUserId!, candidate.toMap());
+      _signalingService?.sendIceCandidate(_remoteUserId!, candidate.toMap());
     };
 
     final offer = await _webrtcService.createOffer();
-    _signalingService.sendOffer(_remoteUserId!, offer.toMap());
-
-    // Navigate to Call Screen
-    _navigateToCallScreen(targetUserName, isOutgoing: true);
+    _signalingService?.sendOffer(_remoteUserId!, offer.toMap());
   }
 
   // ── Incoming Call ─────────────────────────────────────────────────────────
 
-  void _handleIncomingOffer(Map<String, dynamic> data) async {
-    _remoteUserId = data['from'];
-    _currentCallId = const Uuid().v4(); // In a real app, use a shared ID from signaling
-
-    // Show CallKit UI
+  Future<void> showIncomingCall(String callerName) async {
+    _currentCallId = const Uuid().v4();
+    
     final callConfig = CallKitParams(
       id: _currentCallId!,
-      nameCaller: _authService.partnerName,
+      nameCaller: callerName,
       appName: 'Tether',
-      type: 0, // 0 for audio
+      type: 0,
       duration: 30000,
       android: const AndroidParams(
-        isCustomNotification: true,
+        isCustomNotification: false,
         isShowLogo: false,
         ringtonePath: 'system_ringtone_default',
         backgroundColor: '#090909',
-        backgroundUrl: 'https://i.pravatar.cc/100', // Placeholder
         actionColor: '#4CAF50',
       ),
       ios: const IOSParams(
@@ -107,30 +138,46 @@ class CallHandlerService {
         maximumCallsPerCallGroup: 1,
         audioSessionMode: 'default',
         audioSessionActive: true,
-        supportsDTMF: false,
-        supportsHolding: false,
-        supportsGrouping: false,
-        supportsUngrouping: false,
         ringtonePath: 'system_ringtone_default',
       ),
     );
 
     await FlutterCallkitIncoming.showCallkitIncoming(callConfig);
-    
-    // Store offer for when user accepts
+  }
+
+  void _handleIncomingOffer(Map<String, dynamic> data) async {
+    LogService.log('Received WebRTC Offer via signaling');
+    _remoteUserId = data['from'];
     _pendingOffer = data['sdp'];
   }
 
   Map<String, dynamic>? _pendingOffer;
 
   Future<void> _acceptCall() async {
-    if (_pendingOffer == null) return;
+    // Ensure signaling is connected if we were woken up from background
+    initialize();
+
+    if (_pendingOffer == null) {
+      // If we haven't received the offer yet, wait a bit
+      LogService.log('Call accepted but no offer received yet. Waiting...');
+      int retries = 0;
+      while (_pendingOffer == null && retries < 10) {
+        await Future.delayed(const Duration(milliseconds: 500));
+        retries++;
+      }
+    }
+
+    if (_pendingOffer == null) {
+      LogService.log('FAILED: No offer received after wait.');
+      _endCall();
+      return;
+    }
 
     await _webrtcService.initLocalStream();
     await _webrtcService.setupPeerConnection();
 
     _webrtcService.peerConnection!.onIceCandidate = (candidate) {
-      _signalingService.sendIceCandidate(_remoteUserId!, candidate.toMap());
+      _signalingService?.sendIceCandidate(_remoteUserId!, candidate.toMap());
     };
 
     await _webrtcService.setRemoteDescription(
@@ -138,7 +185,7 @@ class CallHandlerService {
     );
 
     final answer = await _webrtcService.createAnswer();
-    _signalingService.sendAnswer(_remoteUserId!, answer.toMap());
+    _signalingService?.sendAnswer(_remoteUserId!, answer.toMap());
 
     _pendingOffer = null;
     

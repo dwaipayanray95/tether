@@ -8,6 +8,7 @@ import 'nav_service.dart';
 import 'location_service.dart';
 import 'auth_service.dart';
 import 'log_service.dart';
+import 'call_handler_service.dart';
 
 // ── Background handler (runs in a separate isolate) ───────────────────────────
 
@@ -28,6 +29,11 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     return;
   }
 
+  if (type == 'call_ping') {
+    final callerName = message.data['callerName'] as String? ?? 'Partner';
+    CallHandlerService().showIncomingCall(callerName);
+    return;
+  }
 }
 
 // ── NotificationService ───────────────────────────────────────────────────────
@@ -106,6 +112,12 @@ class NotificationService {
         if (pos != null) {
           await LocationService.forceUpload(pos, myKey, auth.myName);
         }
+        return;
+      }
+
+      if (type == 'call_ping') {
+        final callerName = message.data['callerName'] as String? ?? 'Partner';
+        CallHandlerService().showIncomingCall(callerName);
         return;
       }
 
