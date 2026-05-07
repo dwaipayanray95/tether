@@ -155,17 +155,17 @@ class CallHandlerService {
     initialize();
 
     if (_pendingOffer == null) {
-      // If we haven't received the offer yet, wait a bit
+      // If we haven't received the offer yet, wait up to 10 seconds
       LogService.log('Call accepted but no offer received yet. Waiting...');
       int retries = 0;
-      while (_pendingOffer == null && retries < 10) {
+      while (_pendingOffer == null && retries < 20) {
         await Future.delayed(const Duration(milliseconds: 500));
         retries++;
       }
     }
 
     if (_pendingOffer == null) {
-      LogService.log('FAILED: No offer received after wait.');
+      LogService.log('FAILED: No offer received after 10s wait.');
       _endCall();
       return;
     }
