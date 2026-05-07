@@ -27,15 +27,28 @@ class _CallScreenState extends State<CallScreen> {
   Timer? _timer;
   int _seconds = 0;
   RTCIceConnectionState _connectionState = RTCIceConnectionState.RTCIceConnectionStateNew;
+  final RTCVideoRenderer _remoteRenderer = RTCVideoRenderer();
 
   @override
   void initState() {
     super.initState();
+    _initRenderer();
     _startTimer();
     widget.webrtcService.onIceConnectionStateChange = (state) {
       if (mounted) {
         setState(() {
           _connectionState = state;
+        });
+      }
+    };
+  }
+
+  Future<void> _initRenderer() async {
+    await _remoteRenderer.initialize();
+    widget.webrtcService.onRemoteStream = (stream) {
+      if (mounted) {
+        setState(() {
+          _remoteRenderer.srcObject = stream;
         });
       }
     };
@@ -60,6 +73,7 @@ class _CallScreenState extends State<CallScreen> {
   @override
   void dispose() {
     _timer?.cancel();
+    _remoteRenderer.dispose();
     super.dispose();
   }
 
@@ -68,9 +82,18 @@ class _CallScreenState extends State<CallScreen> {
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
-        child: Column(
+        child: Stack(
+          fit: StackFit.expand,
           children: [
-            const SizedBox(height: 60),
+            // Hidden video view is REQUIRED by flutter_webrtc to play audio streams
+            SizedBox(
+              width: 0,
+              height: 0,
+              child: RTCVideoView(_remoteRenderer),
+            ),
+            Column(
+              children: [
+                const SizedBox(height: 60),
             // User Info
             CircleAvatar(
               radius: 50,
