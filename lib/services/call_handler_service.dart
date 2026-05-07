@@ -124,7 +124,6 @@ class CallHandlerService {
       android: const AndroidParams(
         isCustomNotification: true,
         isShowLogo: true,
-        isShowCallback: true,
         isShowMissedCallNotification: true,
         ringtonePath: 'ringtone_default',
         backgroundColor: '#090909',
