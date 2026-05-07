@@ -17,6 +17,7 @@ class CallHandlerService {
   CallHandlerService._internal();
 
   SignalingService? _signalingService;
+  SignalingService? get signalingService => _signalingService;
   late WebRTCService _webrtcService;
   final AuthService _authService = AuthService();
   bool _isInitialized = false;
@@ -41,6 +42,10 @@ class CallHandlerService {
         _isMakingOutgoingCall = false;
         _sendWebRTCOffer();
       }
+    };
+
+    _signalingService!.onCallPing = (callerName) {
+      showIncomingCall(callerName);
     };
 
     _signalingService!.connect();

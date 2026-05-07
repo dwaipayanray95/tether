@@ -1,68 +1,21 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:dart_jsonwebtoken/dart_jsonwebtoken.dart';
-import 'package:dio/dio.dart';
-import '../config/notification_config.dart';
+import 'call_handler_service.dart';
 
 class FcmService {
-  static const _tokenUrl = 'https://oauth2.googleapis.com/token';
-  static const _fcmUrl =
-      'https://fcm.googleapis.com/v1/projects/${NotificationConfig.projectId}/messages:send';
-
-  static String? _cachedToken;
-  static DateTime? _tokenExpiry;
-
-  // ── OAuth2 access token via service account JWT ───────────────────────────
-
-  static Future<String> _getAccessToken() async {
-    if (_cachedToken != null &&
-        _tokenExpiry != null &&
-        DateTime.now().isBefore(_tokenExpiry!)) {
-      return _cachedToken!;
-    }
-
-    final now = DateTime.now();
-    final jwt = JWT({
-      'iss': NotificationConfig.clientEmail,
-      'scope': 'https://www.googleapis.com/auth/firebase.messaging',
-      'aud': _tokenUrl,
-      'iat': now.millisecondsSinceEpoch ~/ 1000,
-      'exp': now.add(const Duration(hours: 1)).millisecondsSinceEpoch ~/ 1000,
-    });
-
-    final signed = jwt.sign(
-      RSAPrivateKey(NotificationConfig.privateKey),
-      algorithm: JWTAlgorithm.RS256,
-    );
-
-    final dio = Dio();
-    final response = await dio.post(
-      _tokenUrl,
-      data: 'grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=$signed',
-      options: Options(
-        contentType: 'application/x-www-form-urlencoded',
-        validateStatus: (_) => true,
-      ),
-    );
-
-    final accessToken = response.data['access_token'] as String;
-    _cachedToken = accessToken;
-    _tokenExpiry = now.add(const Duration(minutes: 55));
-    return accessToken;
-  }
-
-  // ── Get partner's FCM token from Firestore ────────────────────────────────
-
-  static Future<String?> _getPartnerToken(String partnerName) async {
+  static Future<String?> _getPartnerUid(String partnerName) async {
+    final partnerEmail = partnerName.toLowerCase() == 'ray' 
+        ? 'dwaipayanray95@gmail.com' 
+        : 'apoo.0404@gmail.com';
+    
     final snap = await FirebaseFirestore.instance
-        .collection('couples')
-        .doc('ray-aproo')
-        .collection('fcmTokens')
-        .doc(partnerName.toLowerCase())
+        .collection('users')
+        .where('email', isEqualTo: partnerEmail)
+        .limit(1)
         .get();
-    return snap.data()?['token'] as String?;
+    
+    if (snap.docs.isNotEmpty) return snap.docs.first.id;
+    return null;
   }
-
-  // ── Send a push notification ──────────────────────────────────────────────
 
   static Future<void> send({
     required String partnerName,
@@ -72,35 +25,15 @@ class FcmService {
     Map<String, String>? extra,
   }) async {
     try {
-      final token = await _getPartnerToken(partnerName);
-      if (token == null) return;
+      final partnerUid = await _getPartnerUid(partnerName);
+      if (partnerUid == null) return;
 
-      final accessToken = await _getAccessToken();
-      final dio = Dio();
-      final data = <String, String>{'type': type, ...?extra};
-
-      final messageBody = <String, dynamic>{
-        'token': token,
-        'data': data,
-        'android': {'priority': 'high'},
-        'notification': {'title': title, 'body': body},
-      };
-      (messageBody['android'] as Map)['notification'] = {
-        'channel_id': 'tether_default',
-        'default_sound': true,
-        'default_vibrate_timings': true,
-      };
-
-      await dio.post(
-        _fcmUrl,
-        data: {'message': messageBody},
-        options: Options(
-          headers: {'Authorization': 'Bearer $accessToken'},
-          validateStatus: (_) => true,
-        ),
+      CallHandlerService().signalingService?.sendNotification(
+        partnerUid,
+        title,
+        body,
+        payload: {'type': type, ...?extra},
       );
-    } catch (_) {
-      // Silently fail — notifications are best-effort
-    }
+    } catch (_) {}
   }
 }

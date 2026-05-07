@@ -11,6 +11,7 @@ class SignalingService {
   Function(Map<String, dynamic>)? onIceCandidate;
   Function(String)? onUserJoined;
   Function(String)? onUserLeft;
+  Function(String)? onCallPing;
 
   SignalingService({required this.userId});
 
@@ -52,6 +53,10 @@ class SignalingService {
       onUserLeft?.call(data['userId']);
     });
 
+    _socket?.on('call-ping', (data) {
+      onCallPing?.call(data['callerName'] ?? 'Partner');
+    });
+
     _socket?.onDisconnect((_) {
       LogService.log('Disconnected from Signaling Server');
     });
@@ -90,6 +95,15 @@ class SignalingService {
       'to': to,
       'from': userId,
       'callerName': callerName,
+    });
+  }
+
+  void sendNotification(String to, String title, String body, {Map<String, dynamic>? payload}) {
+    _socket?.emit('send-notification', {
+      'to': to,
+      'title': title,
+      'body': body,
+      'payload': payload,
     });
   }
 
