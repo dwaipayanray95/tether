@@ -1,3 +1,82 @@
+import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
+import '../services/webrtc_service.dart';
+
+class CallScreen extends StatefulWidget {
+  final String userName;
+  final bool isOutgoing;
+  final WebRTCService webrtcService;
+  final VoidCallback onHangup;
+
+  const CallScreen({
+    super.key,
+    required this.userName,
+    required this.isOutgoing,
+    required this.webrtcService,
+    required this.onHangup,
+  });
+
+  @override
+  State<CallScreen> createState() => _CallScreenState();
+}
+
+class _CallScreenState extends State<CallScreen> {
+  bool _isMuted = false;
+  bool _isSpeakerOn = false;
+  Timer? _timer;
+  int _seconds = 0;
+  RTCIceConnectionState _connectionState = RTCIceConnectionState.RTCIceConnectionStateNew;
+  final RTCVideoRenderer _remoteRenderer = RTCVideoRenderer();
+
+  @override
+  void initState() {
+    super.initState();
+    _initRenderer();
+    _startTimer();
+    widget.webrtcService.onIceConnectionStateChange = (state) {
+      if (mounted) {
+        setState(() {
+          _connectionState = state;
+        });
+      }
+    };
+  }
+
+  Future<void> _initRenderer() async {
+    await _remoteRenderer.initialize();
+    widget.webrtcService.onRemoteStream = (stream) {
+      if (mounted) {
+        setState(() {
+          _remoteRenderer.srcObject = stream;
+        });
+      }
+    };
+  }
+
+  void _startTimer() {
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (mounted) {
+        setState(() {
+          _seconds++;
+        });
+      }
+    });
+  }
+
+  String _formatDuration(int seconds) {
+    final minutes = (seconds / 60).floor();
+    final remainingSeconds = seconds % 60;
+    return '${minutes.toString().padLeft(2, '0')}:${remainingSeconds.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _remoteRenderer.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -6,6 +85,7 @@
         child: Stack(
           fit: StackFit.expand,
           children: [
+            // Hidden video view is REQUIRED by flutter_webrtc to play audio streams
             SizedBox(
               width: 0,
               height: 0,
@@ -79,3 +159,55 @@
       ),
     );
   }
+
+  String _getStatusText() {
+    switch (_connectionState) {
+      case RTCIceConnectionState.RTCIceConnectionStateNew:
+      case RTCIceConnectionState.RTCIceConnectionStateChecking:
+        return widget.isOutgoing ? 'Calling...' : 'Connecting...';
+      case RTCIceConnectionState.RTCIceConnectionStateConnected:
+        return 'Connected';
+      case RTCIceConnectionState.RTCIceConnectionStateFailed:
+        return 'Connection Failed';
+      case RTCIceConnectionState.RTCIceConnectionStateDisconnected:
+        return 'Disconnected';
+      case RTCIceConnectionState.RTCIceConnectionStateClosed:
+        return 'Call Ended';
+      default:
+        return '';
+    }
+  }
+}
+
+class _IconButton extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final Color iconColor;
+  final double size;
+  final VoidCallback onPressed;
+
+  const _IconButton({
+    required this.icon,
+    required this.color,
+    required this.iconColor,
+    this.size = 60,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onPressed,
+      borderRadius: BorderRadius.circular(size / 2),
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          color: color,
+          shape: BoxShape.circle,
+        ),
+        child: Icon(icon, color: iconColor, size: size * 0.5),
+      ),
+    );
+  }
+}
