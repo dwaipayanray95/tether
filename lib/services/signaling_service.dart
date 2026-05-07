@@ -85,6 +85,14 @@ class SignalingService {
     });
   }
 
+  void sendCallPing(String to, String callerName) {
+    _socket?.emit('call-ping', {
+      'to': to,
+      'from': userId,
+      'callerName': callerName,
+    });
+  }
+
   void dispose() {
     _socket?.disconnect();
     _socket?.dispose();

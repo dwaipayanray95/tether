@@ -79,21 +79,13 @@ class CallHandlerService {
     _currentCallId = const Uuid().v4();
     _isMakingOutgoingCall = true;
 
-    // 1. Send FCM Ping via Firestore to wake the partner
-    await FirebaseFirestore.instance
-        .collection('couples')
-        .doc('ray-aproo')
-        .collection('call_pings')
-        .add({
-      'callerUid': _authService.currentUser!.uid,
-      'callerName': _authService.myName,
-      'timestamp': FieldValue.serverTimestamp(),
-    });
+    // 1. Send Signaling Ping (Node server will handle FCM if partner is offline)
+    _signalingService?.sendCallPing(targetUserId, _authService.myName);
 
     // 2. Prepare WebRTC locally
     await _webrtcService.initLocalStream();
 
-    // 3. Wait for partner to join the signaling server (triggered by FCM)
+    // 3. Wait for partner to join the signaling server
     // The actual offer will be sent in _signalingService.onUserJoined callback
     LogService.log('Call Ping sent. Waiting for partner to join signaling...');
 
