@@ -22,6 +22,25 @@ const _reactionEmojis = [
   '😁', '🤩', '💯', '🙈', '🫶', '🥹',
 ];
 
+// ── Emoji Helpers ────────────────────────────────────────────────────────────
+
+bool _isEmojiOnly(String text) {
+  if (text.trim().isEmpty) return false;
+  final regex = RegExp(
+    r'^[\u{1f300}-\u{1f5ff}\u{1f900}-\u{1f9ff}\u{1f600}-\u{1f64f}\u{1f680}-\u{1f6ff}\u{2600}-\u{26ff}\u{2700}-\u{27bf}\u{1f1e6}-\u{1f1ff}\u{1f191}-\u{1f251}\u{1f004}\u{1f0cf}\u{1f170}-\u{1f171}\u{1f17e}-\u{1f17f}\u{1f18e}\u{3030}\u{2b50}\u{2b55}\u{2934}-\u{2935}\u{2b05}-\u{2b07}\u{2b1b}-\u{2b1c}\u{3297}\u{3299}\u{303d}\u{00a9}\u{00ae}\u{2122}\u{23f3}\u{24c2}\u{23e9}-\u{23ef}\u{25b6}\u{23f8}-\u{23fa}\u{200d}\u{fe0f}\s]+$',
+    unicode: true,
+  );
+  return regex.hasMatch(text.trim());
+}
+
+int _countEmojis(String text) {
+  final regex = RegExp(
+    r'[\u{1f300}-\u{1f5ff}\u{1f900}-\u{1f9ff}\u{1f600}-\u{1f64f}\u{1f680}-\u{1f6ff}\u{2600}-\u{26ff}\u{2700}-\u{27bf}\u{1f1e6}-\u{1f1ff}\u{1f191}-\u{1f251}\u{1f004}\u{1f0cf}\u{1f170}-\u{1f171}\u{1f17e}-\u{1f17f}\u{1f18e}\u{3030}\u{2b50}\u{2b55}\u{2934}-\u{2935}\u{2b05}-\u{2b07}\u{2b1b}-\u{2b1c}\u{3297}\u{3299}\u{303d}\u{00a9}\u{00ae}\u{2122}\u{23f3}\u{24c2}\u{23e9}-\u{23ef}\u{25b6}\u{23f8}-\u{23fa}\u{200d}\u{fe0f}]',
+    unicode: true,
+  );
+  return regex.allMatches(text).length;
+}
+
 class ChatScreen extends StatefulWidget {
   final void Function(int)? onNavigate;
 
@@ -41,6 +60,7 @@ class ChatScreenState extends State<ChatScreen> {
   // Scroll
   final _itemScrollController = ItemScrollController();
   final _itemPositionsListener = ItemPositionsListener.create();
+  bool _showScrollToBottom = false;
 
   // Pagination state
   List<Message> _messages = [];
@@ -119,8 +139,17 @@ class ChatScreenState extends State<ChatScreen> {
   }
 
   void _onPositionsChanged() {
-    if (_isLoadingMore || !_hasMore || _messages.isEmpty) return;
     final positions = _itemPositionsListener.itemPositions.value;
+    if (positions.isNotEmpty) {
+      final minIdx = positions.map((p) => p.index).reduce((a, b) => a < b ? a : b);
+      // Show FAB if we're scrolled away from bottom (index 0)
+      final show = minIdx > 1;
+      if (show != _showScrollToBottom) {
+        setState(() => _showScrollToBottom = show);
+      }
+    }
+
+    if (_isLoadingMore || !_hasMore || _messages.isEmpty) return;
     if (positions.isEmpty) return;
     final maxIdx = positions.map((p) => p.index).reduce(max);
     // In reversed list index 0 is newest; high index = oldest.
@@ -128,6 +157,14 @@ class ChatScreenState extends State<ChatScreen> {
     if (maxIdx >= _messages.length - 10) {
       _loadMoreMessages();
     }
+  }
+
+  void _scrollToBottom() {
+    _itemScrollController.scrollTo(
+      index: 0,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+    );
   }
 
   Future<void> _loadMoreMessages() async {
@@ -333,7 +370,33 @@ class ChatScreenState extends State<ChatScreen> {
       ),
       body: Column(
         children: [
-          Expanded(child: _buildMessageList()),
+          Expanded(
+            child: Stack(
+              children: [
+                _buildMessageList(),
+                if (!_searchActive)
+                  Positioned(
+                    right: 16,
+                    bottom: 16,
+                    child: AnimatedOpacity(
+                      opacity: _showScrollToBottom ? 1.0 : 0.0,
+                      duration: const Duration(milliseconds: 200),
+                      curve: Curves.easeInOut,
+                      child: IgnorePointer(
+                        ignoring: !_showScrollToBottom,
+                        child: FloatingActionButton.small(
+                          onPressed: _scrollToBottom,
+                          backgroundColor: AppTheme.primary,
+                          foregroundColor: Colors.white,
+                          elevation: 2,
+                          child: const Icon(Icons.keyboard_arrow_down_rounded),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
           if (!_searchActive) _buildInput(),
         ],
       ),
@@ -609,7 +672,21 @@ class _MessageBubble extends StatelessWidget {
     return DateFormat.jm().format(sentAt);
   }
 
-  Widget _buildMessageText(String text, bool isMe) {
+  Widget _buildMessageText(String text, bool isMe, {bool isEmojiOnly = false}) {
+    if (isEmojiOnly) {
+      final emojiCount = _countEmojis(text);
+      double size = 15;
+      if (emojiCount == 1) {
+        size = 40;
+      } else if (emojiCount == 2) {
+        size = 30;
+      } else if (emojiCount == 3) {
+        size = 28;
+      }
+
+      return Text(text, style: TextStyle(fontSize: size));
+    }
+
     final baseColor = isMe ? Colors.white : AppTheme.textDark;
     if (searchQuery.isEmpty) {
       return Text(text, style: TextStyle(color: baseColor, fontSize: 15));
@@ -651,9 +728,10 @@ class _MessageBubble extends StatelessWidget {
         .map((e) => e.value)
         .firstOrNull;
     final hasReactions = message.reactions.isNotEmpty;
+    final isEmojiOnly = _isEmojiOnly(message.text);
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: 2),
       child: Row(
         mainAxisAlignment:
             isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
@@ -684,21 +762,27 @@ class _MessageBubble extends StatelessWidget {
                   child: Container(
                     constraints: BoxConstraints(
                         maxWidth: MediaQuery.of(context).size.width * 0.72),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 10),
+                    padding: isEmojiOnly 
+                        ? const EdgeInsets.symmetric(horizontal: 4, vertical: 4)
+                        : const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                     decoration: BoxDecoration(
-                      color: isMe ? AppTheme.primary : AppTheme.surface,
+                      color: isEmojiOnly 
+                          ? Colors.transparent 
+                          : (isMe ? AppTheme.primary : AppTheme.surface),
                       borderRadius: BorderRadius.only(
                         topLeft: const Radius.circular(18),
                         topRight: const Radius.circular(18),
                         bottomLeft: Radius.circular(isMe ? 18 : 4),
                         bottomRight: Radius.circular(isMe ? 4 : 18),
                       ),
-                      border:
-                          isMe ? null : Border.all(color: AppTheme.divider),
+                      border: isEmojiOnly || isMe 
+                          ? null 
+                          : Border.all(color: AppTheme.divider),
                     ),
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      crossAxisAlignment: isEmojiOnly 
+                          ? (isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start)
+                          : CrossAxisAlignment.start,
                       children: [
                         // Reply preview — tappable to scroll to original
                         if (message.replyToText != null)
@@ -735,7 +819,7 @@ class _MessageBubble extends StatelessWidget {
                               ),
                             ),
                           ),
-                        _buildMessageText(message.text, isMe),
+                        _buildMessageText(message.text, isMe, isEmojiOnly: isEmojiOnly),
                         // ── Timestamp + receipt inside the bubble ──────────
                         const SizedBox(height: 4),
                         Align(
@@ -746,7 +830,7 @@ class _MessageBubble extends StatelessWidget {
                               Text(
                                 _formatTimestamp(message.sentAt),
                                 style: TextStyle(
-                                  color: isMe
+                                  color: isMe && !isEmojiOnly
                                       ? Colors.white.withValues(alpha: 0.6)
                                       : AppTheme.textMuted,
                                   fontSize: 10,
@@ -760,15 +844,15 @@ class _MessageBubble extends StatelessWidget {
                                       : Icons.done_rounded,
                                   size: 12,
                                   color: isRead
-                                      ? Colors.white.withValues(alpha: 0.85)
-                                      : Colors.white.withValues(alpha: 0.45),
+                                      ? (isEmojiOnly ? AppTheme.primary : Colors.white.withValues(alpha: 0.85))
+                                      : (isEmojiOnly ? AppTheme.textMuted : Colors.white.withValues(alpha: 0.45)),
                                 ),
                                 if (isRead && partnerReadTime != null) ...[
                                   const SizedBox(width: 4),
                                   Text(
                                     'Read ${DateFormat.jm().format(partnerReadTime)}',
                                     style: TextStyle(
-                                      color: Colors.white.withValues(alpha: 0.6),
+                                      color: isEmojiOnly ? AppTheme.textMuted : Colors.white.withValues(alpha: 0.6),
                                       fontSize: 10,
                                     ),
                                   ),

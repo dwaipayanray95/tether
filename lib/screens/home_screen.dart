@@ -181,7 +181,6 @@ class _HomeScreenState extends State<HomeScreen>
 
   Future<void> _sendPoke() async {
     final myUid = _auth.currentUser!.uid;
-    if (_lastPokeFrom == myUid) return;
 
     await _pokeController.forward();
     await _pokeController.reverse();
@@ -447,7 +446,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   Widget _buildPokeCard() {
     final myUid = _auth.currentUser?.uid;
-    final canPoke = _lastPokeFrom != myUid;
+    final isLastPokedByMe = _lastPokeFrom == myUid;
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -463,16 +462,12 @@ class _HomeScreenState extends State<HomeScreen>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('Poke ${_auth.partnerName}',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleMedium
-                        ?.copyWith(
-                            color: canPoke ? null : AppTheme.textMuted)),
+                    style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 4),
                 Text(
-                  canPoke
-                      ? 'Let them know you\'re thinking of them'
-                      : 'You poked ${_auth.partnerName}! 💕',
+                  isLastPokedByMe
+                      ? 'You poked ${_auth.partnerName}! Poke again? 💕'
+                      : 'Let them know you\'re thinking of them',
                   style: Theme.of(context)
                       .textTheme
                       .bodySmall
@@ -485,19 +480,17 @@ class _HomeScreenState extends State<HomeScreen>
           ScaleTransition(
             scale: _pokeScale,
             child: GestureDetector(
-              onTap: canPoke ? _sendPoke : null,
+              onTap: _sendPoke,
               child: Container(
                 width: 52,
                 height: 52,
                 decoration: BoxDecoration(
-                  color: canPoke
-                      ? AppTheme.primaryLight
-                      : AppTheme.divider.withValues(alpha: 0.2),
+                  color: AppTheme.primaryLight,
                   borderRadius: BorderRadius.circular(16),
                 ),
-                child: Icon(
-                  !canPoke ? Icons.favorite : Icons.touch_app_rounded,
-                  color: canPoke ? AppTheme.primary : AppTheme.textMuted,
+                child: const Icon(
+                  Icons.touch_app_rounded,
+                  color: AppTheme.primary,
                   size: 26,
                 ),
               ),
