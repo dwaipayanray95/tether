@@ -50,6 +50,28 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('call-ping', (data) => {
+    const { to, from, callerName } = data;
+    const targetSocketId = users.get(to);
+    if (targetSocketId) {
+      io.to(targetSocketId).emit('call-ping', { from, callerName });
+      console.log(`Call Ping sent from ${from} to ${to}`);
+    } else {
+      console.log(`Call Ping target ${to} is offline`);
+    }
+  });
+
+  socket.on('call-ended', (data) => {
+    const { to, from } = data;
+    const targetSocketId = users.get(to);
+    if (targetSocketId) {
+      io.to(targetSocketId).emit('call-ended', { from });
+      console.log(`Call Ended sent from ${from} to ${to}`);
+    } else {
+      console.log(`Call Ended target ${to} is offline`);
+    }
+  });
+
   socket.on('disconnect', () => {
     for (const [userId, socketId] of users.entries()) {
       if (socketId === socket.id) {

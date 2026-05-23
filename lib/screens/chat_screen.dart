@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' show max;
+import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -9,6 +10,9 @@ import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import 'package:uuid/uuid.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import 'package:intl/intl.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../models/message_model.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
@@ -81,6 +85,9 @@ class ChatScreenState extends State<ChatScreen> {
   String _searchQuery = '';
   List<Message>? _allMessages; // null = not yet loaded
   bool _loadingAllMessages = false;
+  
+  // Tracking locally uploading images for instant rendering (messageId -> localPath)
+  final Map<String, String> _uploadingImages = {};
 
   String get _myUid => FirebaseAuth.instance.currentUser?.uid ?? '';
   bool get isSearchActive => _searchActive;
@@ -242,6 +249,156 @@ class ChatScreenState extends State<ChatScreen> {
         replyToText: reply?.text,
       ),
       senderName: _auth.myName,
+    );
+  }
+
+  Future<void> _pickAndSendImage(ImageSource source) async {
+    try {
+      final picker = ImagePicker();
+      final pickedFile = await picker.pickImage(
+        source: source,
+        imageQuality: 70, // Automatically compress to 70% quality
+        maxWidth: 1024,   // Compress max width to 1024px to save storage/bandwidth
+      );
+
+      if (pickedFile == null) return;
+
+      final messageId = const Uuid().v4();
+      final localPath = pickedFile.path;
+
+      // 1. Add to the local uploading map
+      setState(() {
+        _uploadingImages[messageId] = localPath;
+        // Inject a temporary local message for instant rendering
+        final tempMessage = Message(
+          id: messageId,
+          senderId: _myUid,
+          text: '📷 Photo',
+          type: MessageType.image,
+          imageUrl: localPath, // Use local path as a placeholder
+          sentAt: DateTime.now(),
+          readBy: [_myUid],
+        );
+        _messages.insert(0, tempMessage);
+      });
+
+      // Scroll to newest message
+      _scrollToBottom();
+
+      // 2. Upload to Firebase Storage in the background
+      final ref = FirebaseStorage.instance
+          .ref()
+          .child('couples')
+          .child(_coupleId)
+          .child('images')
+          .child('$messageId.jpg');
+
+      final uploadTask = ref.putFile(File(localPath));
+
+      // 3. Complete the send on success
+      final snapshot = await uploadTask;
+      final downloadUrl = await snapshot.ref.getDownloadURL();
+
+      // 4. Save to Firestore
+      final reply = _replyTo;
+      _clearReply();
+      
+      await _firestore.sendMessage(
+        _coupleId,
+        Message(
+          id: messageId,
+          senderId: _myUid,
+          text: '📷 Photo',
+          type: MessageType.image,
+          imageUrl: downloadUrl,
+          sentAt: DateTime.now(),
+          readBy: [_myUid],
+          replyToId: reply?.id,
+          replyToText: reply?.text,
+        ),
+        senderName: _auth.myName,
+      );
+
+      // Remove from the local uploading map (the Firestore stream listener will update the list with the real message)
+      setState(() {
+        _uploadingImages.remove(messageId);
+      });
+      
+    } catch (e) {
+      LogService.log('Error picking/sending image: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to send image: $e')),
+        );
+      }
+    }
+  }
+
+  void _showImagePickerOptions() {
+    HapticFeedback.mediumImpact();
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        margin: const EdgeInsets.all(16),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Send Photo', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _buildPickerOption(
+                  icon: Icons.camera_alt_rounded,
+                  label: 'Camera',
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _pickAndSendImage(ImageSource.camera);
+                  },
+                ),
+                _buildPickerOption(
+                  icon: Icons.photo_library_rounded,
+                  label: 'Gallery',
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _pickAndSendImage(ImageSource.gallery);
+                  },
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPickerOption({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppTheme.primaryLight,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: AppTheme.primary, size: 28),
+          ),
+          const SizedBox(height: 8),
+          Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+        ],
+      ),
     );
   }
 
@@ -533,7 +690,7 @@ class ChatScreenState extends State<ChatScreen> {
               child: Row(
                 children: [
                   IconButton(
-                    onPressed: () {},
+                    onPressed: _showImagePickerOptions,
                     icon: const Icon(Icons.image_outlined,
                         color: AppTheme.textMuted),
                   ),
@@ -664,6 +821,138 @@ class _MessageBubble extends StatelessWidget {
     this.searchQuery = '',
   });
 
+  Widget _buildImageMessage(BuildContext context) {
+    final isLocalImage = message.imageUrl?.startsWith('/') ?? false;
+    final isRead = message.readBy.length > 1;
+    
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: GestureDetector(
+        onTap: () => _showFullScreenImage(context, message.imageUrl!),
+        child: Container(
+          constraints: const BoxConstraints(
+            maxWidth: 240,
+            maxHeight: 240,
+          ),
+          child: Stack(
+            fit: StackFit.loose,
+            alignment: Alignment.center,
+            children: [
+              if (isLocalImage)
+                Image.file(
+                  File(message.imageUrl!),
+                  width: 240,
+                  height: 240,
+                  fit: BoxFit.cover,
+                )
+              else
+                CachedNetworkImage(
+                  imageUrl: message.imageUrl!,
+                  width: 240,
+                  height: 240,
+                  fit: BoxFit.cover,
+                  placeholder: (context, url) => Container(
+                    width: 240,
+                    height: 240,
+                    color: AppTheme.divider,
+                    child: const Center(
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+                  errorWidget: (context, url, error) => Container(
+                    width: 240,
+                    height: 240,
+                    color: AppTheme.divider,
+                    child: const Icon(Icons.error_outline_rounded, color: Colors.red),
+                  ),
+                ),
+                
+              // Local Upload Progress Overlay
+              if (isLocalImage)
+                Container(
+                  width: 240,
+                  height: 240,
+                  color: Colors.black.withValues(alpha: 0.4),
+                  child: const Center(
+                    child: CircularProgressIndicator(
+                      color: Colors.white,
+                      strokeWidth: 3,
+                    ),
+                  ),
+                ),
+
+              // Glassmorphic / translucent bottom-right timestamp overlay
+              Positioned(
+                bottom: 8,
+                right: 8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _formatTimestamp(message.sentAt),
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 10,
+                        ),
+                      ),
+                      if (isMe && showReceipt) ...[
+                        const SizedBox(width: 4),
+                        Icon(
+                          isRead ? Icons.done_all_rounded : Icons.done_rounded,
+                          size: 12,
+                          color: isRead ? const Color(0xFFE8715A) : Colors.white60,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showFullScreenImage(BuildContext context, String imageUrl) {
+    final isLocal = imageUrl.startsWith('/');
+    
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (ctx) => Scaffold(
+          backgroundColor: Colors.black,
+          appBar: AppBar(
+            backgroundColor: Colors.transparent,
+            foregroundColor: Colors.white,
+            elevation: 0,
+            systemOverlayStyle: SystemUiOverlayStyle.light,
+          ),
+          body: Center(
+            child: InteractiveViewer(
+              minScale: 0.5,
+              maxScale: 4.0,
+              child: isLocal
+                  ? Image.file(File(imageUrl))
+                  : CachedNetworkImage(
+                      imageUrl: imageUrl,
+                      placeholder: (context, url) => const CircularProgressIndicator(color: Colors.white),
+                      errorWidget: (context, url, error) => const Icon(Icons.error, color: Colors.white),
+                    ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   String _formatTimestamp(DateTime sentAt) {
     final diff = DateTime.now().difference(sentAt);
     if (diff.inMinutes < 60) {
@@ -730,6 +1019,8 @@ class _MessageBubble extends StatelessWidget {
     final hasReactions = message.reactions.isNotEmpty;
     final isEmojiOnly = _isEmojiOnly(message.text);
 
+    final isImage = message.type == MessageType.image;
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 2),
       child: Row(
@@ -764,21 +1055,26 @@ class _MessageBubble extends StatelessWidget {
                         maxWidth: MediaQuery.of(context).size.width * 0.72),
                     padding: isEmojiOnly 
                         ? const EdgeInsets.symmetric(horizontal: 4, vertical: 4)
-                        : const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: isEmojiOnly 
-                          ? Colors.transparent 
-                          : (isMe ? AppTheme.primary : AppTheme.surface),
-                      borderRadius: BorderRadius.only(
-                        topLeft: const Radius.circular(18),
-                        topRight: const Radius.circular(18),
-                        bottomLeft: Radius.circular(isMe ? 18 : 4),
-                        bottomRight: Radius.circular(isMe ? 4 : 18),
-                      ),
-                      border: isEmojiOnly || isMe 
-                          ? null 
-                          : Border.all(color: AppTheme.divider),
-                    ),
+                        : isImage
+                            ? EdgeInsets.zero
+                            : const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: isEmojiOnly 
+                        ? const BoxDecoration(color: Colors.transparent)
+                        : isImage
+                            ? BoxDecoration(
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(color: AppTheme.divider),
+                              )
+                            : BoxDecoration(
+                                color: isMe ? AppTheme.primary : AppTheme.surface,
+                                borderRadius: BorderRadius.only(
+                                  topLeft: const Radius.circular(18),
+                                  topRight: const Radius.circular(18),
+                                  bottomLeft: Radius.circular(isMe ? 18 : 4),
+                                  bottomRight: Radius.circular(isMe ? 4 : 18),
+                                ),
+                                border: isMe ? null : Border.all(color: AppTheme.divider),
+                              ),
                     child: Column(
                       crossAxisAlignment: isEmojiOnly 
                           ? (isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start)
@@ -819,48 +1115,52 @@ class _MessageBubble extends StatelessWidget {
                               ),
                             ),
                           ),
-                        _buildMessageText(message.text, isMe, isEmojiOnly: isEmojiOnly),
-                        // ── Timestamp + receipt inside the bubble ──────────
-                        const SizedBox(height: 4),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                _formatTimestamp(message.sentAt),
-                                style: TextStyle(
-                                  color: isMe && !isEmojiOnly
-                                      ? Colors.white.withValues(alpha: 0.6)
-                                      : AppTheme.textMuted,
-                                  fontSize: 10,
-                                ),
-                              ),
-                              if (isMe && showReceipt) ...[
-                                const SizedBox(width: 4),
-                                Icon(
-                                  isRead
-                                      ? Icons.done_all_rounded
-                                      : Icons.done_rounded,
-                                  size: 12,
-                                  color: isRead
-                                      ? (isEmojiOnly ? AppTheme.primary : Colors.white.withValues(alpha: 0.85))
-                                      : (isEmojiOnly ? AppTheme.textMuted : Colors.white.withValues(alpha: 0.45)),
-                                ),
-                                if (isRead && partnerReadTime != null) ...[
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    'Read ${DateFormat.jm().format(partnerReadTime)}',
-                                    style: TextStyle(
-                                      color: isEmojiOnly ? AppTheme.textMuted : Colors.white.withValues(alpha: 0.6),
-                                      fontSize: 10,
-                                    ),
+                        if (isImage)
+                          _buildImageMessage(context)
+                        else ...[
+                          _buildMessageText(message.text, isMe, isEmojiOnly: isEmojiOnly),
+                          // ── Timestamp + receipt inside the bubble ──────────
+                          const SizedBox(height: 4),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  _formatTimestamp(message.sentAt),
+                                  style: TextStyle(
+                                    color: isMe && !isEmojiOnly
+                                        ? Colors.white.withValues(alpha: 0.6)
+                                        : AppTheme.textMuted,
+                                    fontSize: 10,
                                   ),
+                                ),
+                                if (isMe && showReceipt) ...[
+                                  const SizedBox(width: 4),
+                                  Icon(
+                                    isRead
+                                        ? Icons.done_all_rounded
+                                        : Icons.done_rounded,
+                                    size: 12,
+                                    color: isRead
+                                        ? (isEmojiOnly ? AppTheme.primary : Colors.white.withValues(alpha: 0.85))
+                                        : (isEmojiOnly ? AppTheme.textMuted : Colors.white.withValues(alpha: 0.45)),
+                                  ),
+                                  if (isRead && partnerReadTime != null) ...[
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      'Read ${DateFormat.jm().format(partnerReadTime)}',
+                                      style: TextStyle(
+                                        color: isEmojiOnly ? AppTheme.textMuted : Colors.white.withValues(alpha: 0.6),
+                                        fontSize: 10,
+                                      ),
+                                    ),
+                                  ],
                                 ],
                               ],
-                            ],
+                            ),
                           ),
-                        ),
+                        ],
                       ],
                     ),
                   ),
