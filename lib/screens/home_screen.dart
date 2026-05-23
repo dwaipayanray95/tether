@@ -37,6 +37,7 @@ class _HomeScreenState extends State<HomeScreen>
   // Poke status
   String? _lastPokeFrom;
   StreamSubscription? _pokeSub;
+  bool _pokeCooldown = false;
 
   // Distance
   Position? _myPosition;
@@ -180,13 +181,23 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _sendPoke() async {
+    if (_pokeCooldown) return;
+    
     final myUid = _auth.currentUser!.uid;
 
+    setState(() => _pokeCooldown = true);
+    
     await _pokeController.forward();
     await _pokeController.reverse();
     HapticFeedback.mediumImpact();
     
     await _firestore.sendPoke(coupleId, myUid, _auth.myName);
+
+    Future.delayed(const Duration(seconds: 3), () {
+      if (mounted) {
+        setState(() => _pokeCooldown = false);
+      }
+    });
   }
 
   Future<void> _startCall() async {
@@ -448,6 +459,15 @@ class _HomeScreenState extends State<HomeScreen>
     final myUid = _auth.currentUser?.uid;
     final isLastPokedByMe = _lastPokeFrom == myUid;
 
+    String bannerText;
+    if (_pokeCooldown) {
+      bannerText = 'You have poked them';
+    } else if (isLastPokedByMe) {
+      bannerText = 'You poked ${_auth.partnerName}! Poke again? 💕';
+    } else {
+      bannerText = 'Let them know you\'re thinking of them';
+    }
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -462,12 +482,12 @@ class _HomeScreenState extends State<HomeScreen>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('Poke ${_auth.partnerName}',
-                    style: Theme.of(context).textTheme.titleMedium),
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          color: _pokeCooldown ? AppTheme.textMuted : null,
+                        )),
                 const SizedBox(height: 4),
                 Text(
-                  isLastPokedByMe
-                      ? 'You poked ${_auth.partnerName}! Poke again? 💕'
-                      : 'Let them know you\'re thinking of them',
+                  bannerText,
                   style: Theme.of(context)
                       .textTheme
                       .bodySmall
@@ -480,17 +500,19 @@ class _HomeScreenState extends State<HomeScreen>
           ScaleTransition(
             scale: _pokeScale,
             child: GestureDetector(
-              onTap: _sendPoke,
+              onTap: _pokeCooldown ? null : _sendPoke,
               child: Container(
                 width: 52,
                 height: 52,
                 decoration: BoxDecoration(
-                  color: AppTheme.primaryLight,
+                  color: _pokeCooldown
+                      ? AppTheme.divider.withValues(alpha: 0.2)
+                      : AppTheme.primaryLight,
                   borderRadius: BorderRadius.circular(16),
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.touch_app_rounded,
-                  color: AppTheme.primary,
+                  color: _pokeCooldown ? AppTheme.textMuted : AppTheme.primary,
                   size: 26,
                 ),
               ),

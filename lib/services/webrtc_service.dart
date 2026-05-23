@@ -62,7 +62,7 @@ class WebRTCService {
   }
 
   Future<void> addIceCandidate(RTCIceCandidate candidate) async {
-    await _peerConnection!.addCandidate(candidate);
+    await _peerConnection?.addCandidate(candidate);
   }
 
   void toggleMute(bool isMuted) {

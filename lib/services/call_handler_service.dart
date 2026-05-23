@@ -1,11 +1,11 @@
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:flutter_callkit_incoming/entities/entities.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:uuid/uuid.dart';
 import 'signaling_service.dart';
 import 'webrtc_service.dart';
 import 'auth_service.dart';
+import 'fcm_service.dart';
 import 'log_service.dart';
 import 'nav_service.dart';
 import '../screens/call_screen.dart';
@@ -24,6 +24,10 @@ class CallHandlerService {
   
   String? _currentCallId;
   String? _remoteUserId;
+
+  // ICE Candidate Queue
+  final List<Map<String, dynamic>> _pendingIceCandidates = [];
+  bool _remoteDescriptionSet = false;
 
   void initialize() {
     if (_isInitialized) return;
@@ -48,6 +52,11 @@ class CallHandlerService {
       showIncomingCall(callerName);
     };
 
+    _signalingService!.onCallEnded = (from) {
+      LogService.log('Remote call ended signaled. Terminating call locally.');
+      endCall(remote: true);
+    };
+
     _signalingService!.connect();
     _isInitialized = true;
 
@@ -67,7 +76,7 @@ class CallHandlerService {
           break;
         case Event.actionCallEnded:
           LogService.log('CallKit: Call Ended');
-          _endCall();
+          endCall();
           break;
         default:
           break;
@@ -84,14 +93,31 @@ class CallHandlerService {
     _currentCallId = const Uuid().v4();
     _isMakingOutgoingCall = true;
 
-    // 1. Send Signaling Ping (Node server will handle FCM if partner is offline)
+    // Reset ICE state
+    _pendingIceCandidates.clear();
+    _remoteDescriptionSet = false;
+
+    // 1. Send Direct FCM Call Ping (Wakes the partner instantly even if background/offline)
+    await FcmService.send(
+      partnerName: targetUserName,
+      title: '📞 Incoming Call',
+      body: '${_authService.myName} is calling you...',
+      type: 'call_ping',
+      extra: {
+        'callerName': _authService.myName,
+      },
+    );
+
+    // 2. Make sure signaling is initialized & connected
+    initialize();
+    _signalingService?.connect();
+
+    // 3. Send Signaling Ping as backup
     _signalingService?.sendCallPing(targetUserId, _authService.myName);
 
-    // 2. Prepare WebRTC locally
+    // 4. Prepare WebRTC locally
     await _webrtcService.initLocalStream();
 
-    // 3. Wait for partner to join the signaling server
-    // The actual offer will be sent in _signalingService.onUserJoined callback
     LogService.log('Call Ping sent. Waiting for partner to join signaling...');
 
     // Navigate to Call Screen immediately to show "Calling..."
@@ -103,7 +129,9 @@ class CallHandlerService {
     await _webrtcService.setupPeerConnection();
 
     _webrtcService.peerConnection!.onIceCandidate = (candidate) {
-      _signalingService?.sendIceCandidate(_remoteUserId!, candidate.toMap());
+      if (_remoteUserId != null) {
+        _signalingService?.sendIceCandidate(_remoteUserId!, candidate.toMap());
+      }
     };
 
     final offer = await _webrtcService.createOffer();
@@ -153,6 +181,11 @@ class CallHandlerService {
   Future<void> _acceptCall() async {
     // Ensure signaling is connected if we were woken up from background
     initialize();
+    _signalingService?.connect();
+
+    // Reset ICE state
+    _pendingIceCandidates.clear();
+    _remoteDescriptionSet = false;
 
     if (_pendingOffer == null) {
       // If we haven't received the offer yet, wait up to 10 seconds
@@ -166,7 +199,7 @@ class CallHandlerService {
 
     if (_pendingOffer == null) {
       LogService.log('FAILED: No offer received after 10s wait.');
-      _endCall();
+      endCall();
       return;
     }
 
@@ -174,12 +207,15 @@ class CallHandlerService {
     await _webrtcService.setupPeerConnection();
 
     _webrtcService.peerConnection!.onIceCandidate = (candidate) {
-      _signalingService?.sendIceCandidate(_remoteUserId!, candidate.toMap());
+      if (_remoteUserId != null) {
+        _signalingService?.sendIceCandidate(_remoteUserId!, candidate.toMap());
+      }
     };
 
     await _webrtcService.setRemoteDescription(
       RTCSessionDescription(_pendingOffer!['sdp'], _pendingOffer!['type']),
     );
+    await _drainIceCandidates();
 
     final answer = await _webrtcService.createAnswer();
     _signalingService?.sendAnswer(_remoteUserId!, answer.toMap());
@@ -193,24 +229,69 @@ class CallHandlerService {
     await _webrtcService.setRemoteDescription(
       RTCSessionDescription(data['sdp']['sdp'], data['sdp']['type']),
     );
+    await _drainIceCandidates();
   }
 
   void _handleIceCandidate(Map<String, dynamic> data) async {
-    await _webrtcService.addIceCandidate(
-      RTCIceCandidate(data['candidate']['candidate'], data['candidate']['sdpMid'], data['candidate']['sdpMLineIndex']),
-    );
+    if (_remoteDescriptionSet) {
+      await _webrtcService.addIceCandidate(
+        RTCIceCandidate(data['candidate']['candidate'], data['candidate']['sdpMid'], data['candidate']['sdpMLineIndex']),
+      );
+    } else {
+      LogService.log('Queueing early ICE candidate.');
+      _pendingIceCandidates.add(data);
+    }
+  }
+
+  Future<void> _drainIceCandidates() async {
+    _remoteDescriptionSet = true;
+    if (_pendingIceCandidates.isNotEmpty) {
+      LogService.log('Draining ${_pendingIceCandidates.length} queued ICE candidates');
+      for (final data in _pendingIceCandidates) {
+        try {
+          await _webrtcService.addIceCandidate(
+            RTCIceCandidate(data['candidate']['candidate'], data['candidate']['sdpMid'], data['candidate']['sdpMLineIndex']),
+          );
+        } catch (e) {
+          LogService.log('Failed to add queued ICE candidate: $e');
+        }
+      }
+      _pendingIceCandidates.clear();
+    }
   }
 
   // ── Cleanup ───────────────────────────────────────────────────────────────
 
   void _declineCall() {
     _pendingOffer = null;
-    // Send rejection signaling if needed
+    endCall();
   }
 
-  void _endCall() {
+  void endCall({bool remote = false}) {
+    LogService.log('Hanging up call (remote: $remote)');
+    
+    if (!remote && _remoteUserId != null) {
+      // 1. Send direct FCM call_ended to terminate ringing immediately on partner's device
+      FcmService.send(
+        partnerName: _authService.partnerName,
+        title: 'Call Ended',
+        body: 'Call ended',
+        type: 'call_ended',
+      );
+      // 2. Emit call-ended via signaling
+      _signalingService?.sendCallEnded(_remoteUserId!);
+    }
+
     _webrtcService.dispose();
     FlutterCallkitIncoming.endAllCalls();
+
+    _currentCallId = null;
+    _remoteUserId = null;
+    _pendingOffer = null;
+    _isMakingOutgoingCall = false;
+    _pendingIceCandidates.clear();
+    _remoteDescriptionSet = false;
+
     if (navigatorKey.currentState?.canPop() ?? false) {
       navigatorKey.currentState?.pop();
     }
@@ -223,7 +304,7 @@ class CallHandlerService {
           userName: userName,
           isOutgoing: isOutgoing,
           webrtcService: _webrtcService,
-          onHangup: _endCall,
+          onHangup: endCall,
         ),
       ),
     );

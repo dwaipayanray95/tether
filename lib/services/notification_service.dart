@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'nav_service.dart';
 import 'location_service.dart';
 import 'auth_service.dart';
@@ -32,6 +33,12 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   if (type == 'call_ping') {
     final callerName = message.data['callerName'] as String? ?? 'Partner';
     CallHandlerService().showIncomingCall(callerName);
+    return;
+  }
+
+  if (type == 'call_ended') {
+    LogService.log('Call Kit: Ending background calls from remote end request');
+    FlutterCallkitIncoming.endAllCalls();
     return;
   }
 }
@@ -118,6 +125,12 @@ class NotificationService {
       if (type == 'call_ping') {
         final callerName = message.data['callerName'] as String? ?? 'Partner';
         CallHandlerService().showIncomingCall(callerName);
+        return;
+      }
+
+      if (type == 'call_ended') {
+        LogService.log('Call Kit: Ending foreground call from remote end request');
+        CallHandlerService().endCall(remote: true);
         return;
       }
 
