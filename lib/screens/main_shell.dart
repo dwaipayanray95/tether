@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'home_screen.dart';
 import 'chat_screen.dart';
 import 'todo_screen.dart';
@@ -46,7 +47,35 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       _handlePendingNotification();
       // Check for update on launch
       _checkForUpdate();
+      // Proactively check and request all permissions
+      _requestAllPermissions();
     });
+  }
+
+  Future<void> _requestAllPermissions() async {
+    try {
+      LogService.log('Proactively checking/requesting Android permissions...');
+      final List<Permission> permissions = [
+        Permission.notification,
+        Permission.microphone,
+        Permission.camera,
+        Permission.location,
+        Permission.locationAlways,
+        Permission.phone,
+        Permission.systemAlertWindow,
+        Permission.scheduleExactAlarm,
+      ];
+
+      // Request permissions in batch
+      Map<Permission, PermissionStatus> statuses = await permissions.request();
+      
+      // Log the resulting statuses
+      statuses.forEach((permission, status) {
+        LogService.log('Permission status for ${permission.toString()}: $status');
+      });
+    } catch (e) {
+      LogService.log('Error requesting permissions: $e');
+    }
   }
 
   // ── Pending notification ──────────────────────────────────────────────────
