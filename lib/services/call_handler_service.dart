@@ -2,6 +2,7 @@ import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:flutter_callkit_incoming/entities/entities.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:uuid/uuid.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'signaling_service.dart';
 import 'webrtc_service.dart';
 import 'auth_service.dart';
@@ -82,6 +83,24 @@ class CallHandlerService {
           break;
       }
     });
+    
+    requestCallingPermissions();
+  }
+
+  Future<void> requestCallingPermissions() async {
+    try {
+      LogService.log('Proactively requesting calling permissions...');
+      final mic = await Permission.microphone.status;
+      if (mic.isDenied || mic.isPermanentlyDenied) {
+        await Permission.microphone.request();
+      }
+      final notifications = await Permission.notification.status;
+      if (notifications.isDenied || notifications.isPermanentlyDenied) {
+        await Permission.notification.request();
+      }
+    } catch (e) {
+      LogService.log('Error requesting proactive permissions: $e');
+    }
   }
 
   // ── Outgoing Call ─────────────────────────────────────────────────────────
@@ -89,6 +108,12 @@ class CallHandlerService {
   bool _isMakingOutgoingCall = false;
 
   Future<void> makeCall(String targetUserId, String targetUserName) async {
+    // Ensure microphone permission is granted before proceeding
+    final status = await Permission.microphone.status;
+    if (status.isDenied) {
+      await Permission.microphone.request();
+    }
+
     _remoteUserId = targetUserId;
     _currentCallId = const Uuid().v4();
     _isMakingOutgoingCall = true;
@@ -201,6 +226,12 @@ class CallHandlerService {
       LogService.log('FAILED: No offer received after 10s wait.');
       endCall();
       return;
+    }
+
+    // Ensure microphone permission is granted before starting local stream
+    final status = await Permission.microphone.status;
+    if (status.isDenied) {
+      await Permission.microphone.request();
     }
 
     await _webrtcService.initLocalStream();
