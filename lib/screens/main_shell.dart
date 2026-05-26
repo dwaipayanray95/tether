@@ -53,10 +53,11 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   }
 
   Future<void> _requestAllPermissions() async {
-    try {
-      LogService.log('Proactively requesting Android permissions in sequences...');
+    LogService.log('Proactively requesting Android permissions in safe sequences...');
 
-      // 1. Request standard permissions that use dialogs (Notification, Microphone, Camera, Phone, Foreground Location)
+    // 1. Request standard permissions that use dialogs (Notification, Microphone, Camera, Phone, Foreground Location)
+    Map<Permission, PermissionStatus> standardStatuses = {};
+    try {
       final standardPermissions = [
         Permission.notification,
         Permission.microphone,
@@ -66,35 +67,50 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       ];
 
       LogService.log('Requesting Standard Permissions Batch...');
-      Map<Permission, PermissionStatus> standardStatuses = await standardPermissions.request();
+      standardStatuses = await standardPermissions.request();
       
       standardStatuses.forEach((permission, status) {
         LogService.log('Standard Permission ${permission.toString()}: $status');
       });
+    } catch (e) {
+      LogService.log('Error requesting standard batch: $e');
+    }
 
-      // 2. Request Background Location only if Foreground Location is granted (Mandatory OS requirement)
-      if (standardStatuses[Permission.location]?.isGranted == true) {
+    // 2. Request Background Location only if Foreground Location is granted (Mandatory OS requirement)
+    try {
+      final isForegroundGranted = standardStatuses[Permission.location]?.isGranted ?? 
+                                  await Permission.location.isGranted;
+      if (isForegroundGranted) {
         LogService.log('Foreground location granted. Requesting Background Location...');
         final alwaysStatus = await Permission.locationAlways.request();
         LogService.log('Background Location Status: $alwaysStatus');
       }
+    } catch (e) {
+      LogService.log('Error requesting Background Location: $e');
+    }
 
-      // 3. For System Alert Window (Draw Over Other Apps), redirect to settings if denied
+    // 3. For System Alert Window (Draw Over Other Apps), redirect to settings if denied
+    try {
       final overlayGranted = await Permission.systemAlertWindow.isGranted;
       if (!overlayGranted) {
         LogService.log('Draw Over Apps denied. Prompting user to enable in settings...');
-        await Permission.systemAlertWindow.request();
+        final status = await Permission.systemAlertWindow.request();
+        LogService.log('Draw Over Apps Request Status: $status');
       }
+    } catch (e) {
+      LogService.log('Error requesting Draw Over Apps permission: $e');
+    }
 
-      // 4. For Exact Alarms, redirect to settings if denied (Android 12+)
+    // 4. For Exact Alarms, redirect to settings if denied (Android 12+)
+    try {
       final alarmGranted = await Permission.scheduleExactAlarm.isGranted;
       if (!alarmGranted) {
         LogService.log('Schedule Exact Alarms denied. Prompting user to enable in settings...');
-        await Permission.scheduleExactAlarm.request();
+        final status = await Permission.scheduleExactAlarm.request();
+        LogService.log('Schedule Exact Alarms Request Status: $status');
       }
-
     } catch (e) {
-      LogService.log('Error requesting sequential permissions: $e');
+      LogService.log('Error requesting Schedule Exact Alarms: $e');
     }
   }
 
