@@ -54,27 +54,47 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
 
   Future<void> _requestAllPermissions() async {
     try {
-      LogService.log('Proactively checking/requesting Android permissions...');
-      final List<Permission> permissions = [
+      LogService.log('Proactively requesting Android permissions in sequences...');
+
+      // 1. Request standard permissions that use dialogs (Notification, Microphone, Camera, Phone, Foreground Location)
+      final standardPermissions = [
         Permission.notification,
         Permission.microphone,
         Permission.camera,
-        Permission.location,
-        Permission.locationAlways,
         Permission.phone,
-        Permission.systemAlertWindow,
-        Permission.scheduleExactAlarm,
+        Permission.location,
       ];
 
-      // Request permissions in batch
-      Map<Permission, PermissionStatus> statuses = await permissions.request();
+      LogService.log('Requesting Standard Permissions Batch...');
+      Map<Permission, PermissionStatus> standardStatuses = await standardPermissions.request();
       
-      // Log the resulting statuses
-      statuses.forEach((permission, status) {
-        LogService.log('Permission status for ${permission.toString()}: $status');
+      standardStatuses.forEach((permission, status) {
+        LogService.log('Standard Permission ${permission.toString()}: $status');
       });
+
+      // 2. Request Background Location only if Foreground Location is granted (Mandatory OS requirement)
+      if (standardStatuses[Permission.location]?.isGranted == true) {
+        LogService.log('Foreground location granted. Requesting Background Location...');
+        final alwaysStatus = await Permission.locationAlways.request();
+        LogService.log('Background Location Status: $alwaysStatus');
+      }
+
+      // 3. For System Alert Window (Draw Over Other Apps), redirect to settings if denied
+      final overlayGranted = await Permission.systemAlertWindow.isGranted;
+      if (!overlayGranted) {
+        LogService.log('Draw Over Apps denied. Prompting user to enable in settings...');
+        await Permission.systemAlertWindow.request();
+      }
+
+      // 4. For Exact Alarms, redirect to settings if denied (Android 12+)
+      final alarmGranted = await Permission.scheduleExactAlarm.isGranted;
+      if (!alarmGranted) {
+        LogService.log('Schedule Exact Alarms denied. Prompting user to enable in settings...');
+        await Permission.scheduleExactAlarm.request();
+      }
+
     } catch (e) {
-      LogService.log('Error requesting permissions: $e');
+      LogService.log('Error requesting sequential permissions: $e');
     }
   }
 
