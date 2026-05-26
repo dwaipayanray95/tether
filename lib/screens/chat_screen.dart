@@ -10,8 +10,6 @@ import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import 'package:uuid/uuid.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import 'package:intl/intl.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../models/message_model.dart';
 import '../services/auth_service.dart';
@@ -86,8 +84,7 @@ class ChatScreenState extends State<ChatScreen> {
   List<Message>? _allMessages; // null = not yet loaded
   bool _loadingAllMessages = false;
   
-  // Tracking locally uploading images for instant rendering (messageId -> localPath)
-  final Map<String, String> _uploadingImages = {};
+
 
   String get _myUid => FirebaseAuth.instance.currentUser?.uid ?? '';
   bool get isSearchActive => _searchActive;
@@ -252,155 +249,7 @@ class ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Future<void> _pickAndSendImage(ImageSource source) async {
-    try {
-      final picker = ImagePicker();
-      final pickedFile = await picker.pickImage(
-        source: source,
-        imageQuality: 70, // Automatically compress to 70% quality
-        maxWidth: 1024,   // Compress max width to 1024px to save storage/bandwidth
-      );
 
-      if (pickedFile == null) return;
-
-      final messageId = const Uuid().v4();
-      final localPath = pickedFile.path;
-
-      // 1. Add to the local uploading map
-      setState(() {
-        _uploadingImages[messageId] = localPath;
-        // Inject a temporary local message for instant rendering
-        final tempMessage = Message(
-          id: messageId,
-          senderId: _myUid,
-          text: '📷 Photo',
-          type: MessageType.image,
-          imageUrl: localPath, // Use local path as a placeholder
-          sentAt: DateTime.now(),
-          readBy: [_myUid],
-        );
-        _messages.insert(0, tempMessage);
-      });
-
-      // Scroll to newest message
-      _scrollToBottom();
-
-      // 2. Upload to Firebase Storage in the background
-      final ref = FirebaseStorage.instanceFor(bucket: 'gs://tether-8d3fa.appspot.com')
-          .ref()
-          .child('couples')
-          .child(_coupleId)
-          .child('images')
-          .child('$messageId.jpg');
-
-      final uploadTask = ref.putFile(File(localPath));
-
-      // 3. Complete the send on success
-      final snapshot = await uploadTask;
-      final downloadUrl = await snapshot.ref.getDownloadURL();
-
-      // 4. Save to Firestore
-      final reply = _replyTo;
-      _clearReply();
-      
-      await _firestore.sendMessage(
-        _coupleId,
-        Message(
-          id: messageId,
-          senderId: _myUid,
-          text: '📷 Photo',
-          type: MessageType.image,
-          imageUrl: downloadUrl,
-          sentAt: DateTime.now(),
-          readBy: [_myUid],
-          replyToId: reply?.id,
-          replyToText: reply?.text,
-        ),
-        senderName: _auth.myName,
-      );
-
-      // Remove from the local uploading map (the Firestore stream listener will update the list with the real message)
-      setState(() {
-        _uploadingImages.remove(messageId);
-      });
-      
-    } catch (e) {
-      LogService.log('Error picking/sending image: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to send image: $e')),
-        );
-      }
-    }
-  }
-
-  void _showImagePickerOptions() {
-    HapticFeedback.mediumImpact();
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => Container(
-        margin: const EdgeInsets.all(16),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('Send Photo', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 20),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                _buildPickerOption(
-                  icon: Icons.camera_alt_rounded,
-                  label: 'Camera',
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _pickAndSendImage(ImageSource.camera);
-                  },
-                ),
-                _buildPickerOption(
-                  icon: Icons.photo_library_rounded,
-                  label: 'Gallery',
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _pickAndSendImage(ImageSource.gallery);
-                  },
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPickerOption({
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: AppTheme.primaryLight,
-              shape: BoxShape.circle,
-            ),
-            child: Icon(icon, color: AppTheme.primary, size: 28),
-          ),
-          const SizedBox(height: 8),
-          Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
-        ],
-      ),
-    );
-  }
 
   Future<void> _toggleReaction(String messageId, String emoji) async {
     await _firestore.toggleReaction(_coupleId, messageId, emoji, _myUid);
@@ -689,11 +538,6 @@ class ChatScreenState extends State<ChatScreen> {
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
               child: Row(
                 children: [
-                  IconButton(
-                    onPressed: _showImagePickerOptions,
-                    icon: const Icon(Icons.image_outlined,
-                        color: AppTheme.textMuted),
-                  ),
                   Expanded(
                     child: TextField(
                       controller: _textCtrl,
