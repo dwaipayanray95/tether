@@ -286,7 +286,7 @@ class ChatScreenState extends State<ChatScreen> {
       _scrollToBottom();
 
       // 2. Upload to Firebase Storage in the background
-      final ref = FirebaseStorage.instance
+      final ref = FirebaseStorage.instanceFor(bucket: 'gs://tether-8d3fa.appspot.com')
           .ref()
           .child('couples')
           .child(_coupleId)
@@ -748,51 +748,108 @@ class _SwipeableMessage extends StatefulWidget {
   State<_SwipeableMessage> createState() => _SwipeableMessageState();
 }
 
-class _SwipeableMessageState extends State<_SwipeableMessage> {
-  double _offset = 0;
+class _SwipeableMessageState extends State<_SwipeableMessage> with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _translationAnimation;
   bool _triggered = false;
+  double _dragExtent = 0.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 200),
+    );
+    // Custom springy curve for sliding back
+    _translationAnimation = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOutQuad,
+    ).drive(
+      Tween<double>(begin: 0.0, end: 72.0),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _handleDragUpdate(DragUpdateDetails details) {
+    _dragExtent += details.delta.dx;
+    if (_dragExtent < 0) _dragExtent = 0;
+
+    // Apply soft damping resistance
+    final double maxDrag = 120.0;
+    final double progress = (_dragExtent / maxDrag).clamp(0.0, 1.0);
+
+    // Trigger haptic when reaching 55% of maxDrag
+    if (progress >= 0.55 && !_triggered) {
+      _triggered = true;
+      HapticFeedback.lightImpact();
+    } else if (progress < 0.55 && _triggered) {
+      _triggered = false;
+    }
+
+    _controller.value = progress;
+  }
+
+  void _handleDragEnd(DragEndDetails details) {
+    if (_triggered) {
+      widget.onReply();
+    }
+    // Bounce back smoothly
+    _controller.animateTo(0.0, curve: Curves.elasticOut, duration: const Duration(milliseconds: 350));
+    _dragExtent = 0.0;
+    _triggered = false;
+  }
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onHorizontalDragUpdate: (d) {
-        final delta = d.delta.dx;
-        if (delta > 0) {
-          setState(() {
-            _offset = (_offset + delta).clamp(0.0, 72.0);
-          });
-        }
-      },
-      onHorizontalDragEnd: (_) {
-        if (_offset >= 56 && !_triggered) {
-          _triggered = true;
-          widget.onReply();
-        }
-        setState(() {
-          _offset = 0;
-          _triggered = false;
-        });
-      },
-      child: Stack(
-        children: [
-          if (_offset > 8)
-            Positioned(
-              left: 4,
-              top: 0,
-              bottom: 0,
-              child: Center(
-                child: Opacity(
-                  opacity: (_offset / 56).clamp(0.0, 1.0),
-                  child: const Icon(Icons.reply_rounded,
-                      color: AppTheme.primary, size: 20),
+      onHorizontalDragUpdate: _handleDragUpdate,
+      onHorizontalDragEnd: _handleDragEnd,
+      behavior: HitTestBehavior.translucent,
+      child: AnimatedBuilder(
+        animation: _translationAnimation,
+        builder: (context, child) {
+          final offset = _translationAnimation.value;
+          final isTriggeredAtLimit = _controller.value >= 0.55;
+
+          return Stack(
+            clipBehavior: Clip.none,
+            children: [
+              if (offset > 4)
+                Positioned(
+                  left: -32 + (offset * 0.5), // Parallax entry effect
+                  top: 0,
+                  bottom: 0,
+                  child: Center(
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: isTriggeredAtLimit
+                            ? AppTheme.primary
+                            : AppTheme.primaryLight,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        Icons.reply_rounded,
+                        color: isTriggeredAtLimit ? Colors.white : AppTheme.primary,
+                        size: 18,
+                      ),
+                    ),
+                  ),
                 ),
+              Transform.translate(
+                offset: Offset(offset, 0),
+                child: widget.child,
               ),
-            ),
-          Transform.translate(
-            offset: Offset(_offset, 0),
-            child: widget.child,
-          ),
-        ],
+            ],
+          );
+        },
       ),
     );
   }

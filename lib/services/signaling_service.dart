@@ -29,7 +29,7 @@ class SignalingService {
     LogService.log('Connecting to Signaling Server: ${WebRTCConfig.signalingServerUrl}');
     
     _socket = io_client.io(WebRTCConfig.signalingServerUrl, <String, dynamic>{
-      'transports': ['websocket'],
+      'transports': ['polling', 'websocket'],
       'autoConnect': false,
     });
 
