@@ -393,23 +393,65 @@ class _TodoScreenState extends State<TodoScreen> {
               if (pending.isNotEmpty) ...[
                 _sectionLabel('To do'),
                 const SizedBox(height: 8),
-                ...pending.map((t) => _TodoTile(
-                      todo: t,
-                      coupleId: _coupleId,
-                      firestore: _firestore,
-                      onTap: () => _openDetail(t),
-                    )),
+                Container(
+                  decoration: BoxDecoration(
+                    color: AppTheme.surface,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: AppTheme.divider),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: Column(
+                    children: [
+                      for (int i = 0; i < pending.length; i++) ...[
+                        _TodoTile(
+                          todo: pending[i],
+                          coupleId: _coupleId,
+                          firestore: _firestore,
+                          onTap: () => _openDetail(pending[i]),
+                          isStacked: true,
+                        ),
+                        if (i < pending.length - 1)
+                          const Divider(
+                            color: AppTheme.divider,
+                            height: 1,
+                            indent: 56,
+                          ),
+                      ],
+                    ],
+                  ),
+                ),
               ],
               if (done.isNotEmpty) ...[
-                const SizedBox(height: 20),
+                const SizedBox(height: 24),
                 _sectionLabel('Done'),
                 const SizedBox(height: 8),
-                ...done.map((t) => _TodoTile(
-                      todo: t,
-                      coupleId: _coupleId,
-                      firestore: _firestore,
-                      onTap: () => _openDetail(t),
-                    )),
+                Container(
+                  decoration: BoxDecoration(
+                    color: AppTheme.surface.withAlpha(200),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: AppTheme.divider),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: Column(
+                    children: [
+                      for (int i = 0; i < done.length; i++) ...[
+                        _TodoTile(
+                          todo: done[i],
+                          coupleId: _coupleId,
+                          firestore: _firestore,
+                          onTap: () => _openDetail(done[i]),
+                          isStacked: true,
+                        ),
+                        if (i < done.length - 1)
+                          const Divider(
+                            color: AppTheme.divider,
+                            height: 1,
+                            indent: 56,
+                          ),
+                      ],
+                    ],
+                  ),
+                ),
               ],
             ],
           );
@@ -434,12 +476,14 @@ class _TodoTile extends StatelessWidget {
   final String coupleId;
   final FirestoreService firestore;
   final VoidCallback onTap;
+  final bool isStacked;
 
   const _TodoTile({
     required this.todo,
     required this.coupleId,
     required this.firestore,
     required this.onTap,
+    this.isStacked = false,
   });
 
   Widget _buildPriorityIndicator(String priority) {
@@ -568,7 +612,7 @@ class _TodoTile extends StatelessWidget {
       padding: const EdgeInsets.only(left: 20),
       decoration: BoxDecoration(
         color: swipeColor,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: isStacked ? BorderRadius.zero : BorderRadius.circular(14),
       ),
       child: Icon(swipeIcon, color: swipeIconColor),
     );
@@ -578,7 +622,7 @@ class _TodoTile extends StatelessWidget {
       padding: const EdgeInsets.only(right: 20),
       decoration: BoxDecoration(
         color: swipeColor,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: isStacked ? BorderRadius.zero : BorderRadius.circular(14),
       ),
       child: Icon(swipeIcon, color: swipeIconColor),
     );
@@ -596,11 +640,11 @@ class _TodoTile extends StatelessWidget {
         onTap: onTap,
         onLongPress: () => _confirmDeleteTodo(context),
         child: Container(
-          margin: const EdgeInsets.only(bottom: 8),
+          margin: isStacked ? EdgeInsets.zero : const EdgeInsets.only(bottom: 8),
           decoration: BoxDecoration(
-            color: AppTheme.surface,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AppTheme.divider),
+            color: isStacked ? Colors.transparent : AppTheme.surface,
+            borderRadius: isStacked ? BorderRadius.zero : BorderRadius.circular(14),
+            border: isStacked ? null : Border.all(color: AppTheme.divider),
           ),
           child: ListTile(
             contentPadding:
