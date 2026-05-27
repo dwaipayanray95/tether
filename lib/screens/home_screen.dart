@@ -189,6 +189,8 @@ class _HomeScreenState extends State<HomeScreen>
     await _pokeController.forward();
     await _pokeController.reverse();
     HapticFeedback.mediumImpact();
+    await Future.delayed(const Duration(milliseconds: 80));
+    HapticFeedback.heavyImpact();
     
     await _firestore.sendPoke(coupleId, myUid, _auth.myName);
 
