@@ -280,6 +280,50 @@ class FirestoreService {
     return _db.doc('couples/ray-aproo/status/presence').snapshots();
   }
 
+  Future<void> updateMusicPresence(String myKey, Map<String, dynamic>? musicData) async {
+    LogService.log('Updating music presence for $myKey: ${musicData?['track']}');
+    await _db.doc('couples/ray-aproo/status/presence').set({
+      myKey: {
+        'music': musicData,
+      }
+    }, SetOptions(merge: true));
+  }
+
+  // ── Sticky Notes ─────────────────────────────────────────────────────────
+
+  Stream<QuerySnapshot<Map<String, dynamic>>> stickyNotesStream(String coupleId) {
+    return _db
+        .collection('couples')
+        .doc(coupleId)
+        .collection('sticky_notes')
+        .orderBy('createdAt', descending: true)
+        .snapshots();
+  }
+
+  Future<void> addStickyNote(
+      String coupleId, String text, String createdBy, String createdByName, int colorIndex) async {
+    await _db
+        .collection('couples')
+        .doc(coupleId)
+        .collection('sticky_notes')
+        .add({
+      'text': text,
+      'createdBy': createdBy,
+      'createdByName': createdByName,
+      'colorIndex': colorIndex,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Future<void> deleteStickyNote(String coupleId, String noteId) async {
+    await _db
+        .collection('couples')
+        .doc(coupleId)
+        .collection('sticky_notes')
+        .doc(noteId)
+        .delete();
+  }
+
   // ── Couple profile ────────────────────────────────────────────────────────
 
   Future<Map<String, dynamic>?> getCoupleProfile(String coupleId) async {
