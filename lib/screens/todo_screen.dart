@@ -5,6 +5,7 @@ import 'package:timeago/timeago.dart' as timeago;
 import '../models/todo_model.dart';
 import '../models/comment_model.dart';
 import 'package:intl/intl.dart';
+import 'package:flutter/services.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
 import '../services/notification_service.dart';
@@ -312,6 +313,7 @@ class _TodoScreenState extends State<TodoScreen> {
     String? priority,
   }) async {
     LogService.log('Adding new to-do: $title');
+    HapticFeedback.mediumImpact();
     await _firestore.addTodo(
       _coupleId,
       TodoItem(
@@ -642,6 +644,7 @@ class _TodoTile extends StatelessWidget {
           ),
           TextButton(
             onPressed: () {
+              HapticFeedback.mediumImpact();
               Navigator.pop(ctx);
               NotificationService.cancelTodoReminder(todo.id);
               firestore.deleteTodo(coupleId, todo.id);
@@ -685,12 +688,16 @@ class _TodoTile extends StatelessWidget {
       background: swipeBackground,
       secondaryBackground: swipeSecondaryBackground,
       confirmDismiss: (direction) async {
+        HapticFeedback.mediumImpact();
         await firestore.toggleTodo(coupleId, todo);
         return false; // Prevents the tile from disappearing, triggers beautiful slide-back
       },
       child: GestureDetector(
         onTap: onTap,
-        onLongPress: () => _confirmDeleteTodo(context),
+        onLongPress: () {
+          HapticFeedback.heavyImpact();
+          _confirmDeleteTodo(context);
+        },
         child: Container(
           margin: isStacked ? EdgeInsets.zero : const EdgeInsets.only(bottom: 8),
           decoration: BoxDecoration(
@@ -702,7 +709,14 @@ class _TodoTile extends StatelessWidget {
             contentPadding:
                 const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             leading: GestureDetector(
-              onTap: () => firestore.toggleTodo(coupleId, todo),
+              onTap: () {
+                if (todo.isDone) {
+                  HapticFeedback.lightImpact();
+                } else {
+                  HapticFeedback.mediumImpact();
+                }
+                firestore.toggleTodo(coupleId, todo);
+              },
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
                 width: 24,
@@ -840,6 +854,7 @@ class _TodoDetailSheetState extends State<_TodoDetailSheet> {
       ),
       widget.todo.title,
     );
+    HapticFeedback.lightImpact();
     if (mounted) setState(() => _sending = false);
   }
 
@@ -863,6 +878,7 @@ class _TodoDetailSheetState extends State<_TodoDetailSheet> {
           TextButton(
             onPressed: () {
               Navigator.pop(context);
+              HapticFeedback.mediumImpact();
               widget.firestore.deleteComment(
                   widget.coupleId, widget.todo.id, commentId);
             },

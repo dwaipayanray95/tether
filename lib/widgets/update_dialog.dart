@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import '../services/update_service.dart';
 import '../theme/app_theme.dart';
 
@@ -160,11 +161,14 @@ class _ReleaseNotesDialogState extends State<_ReleaseNotesDialog> {
                     letterSpacing: 0.3,
                   ),
                 ),
-                const SizedBox(height: 6),
-                Text(
-                  widget.info.releaseNotes!,
-                  style: const TextStyle(
-                      fontSize: 13, color: AppTheme.textDark, height: 1.5),
+                MarkdownBody(
+                  data: widget.info.releaseNotes!,
+                  styleSheet: MarkdownStyleSheet(
+                    p: const TextStyle(fontSize: 13, color: AppTheme.textDark, height: 1.5),
+                    h1: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                    h2: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                    listBullet: const TextStyle(fontSize: 13, color: AppTheme.textDark),
+                  ),
                 ),
               ],
             ],
