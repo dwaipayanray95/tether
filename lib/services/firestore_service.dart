@@ -60,12 +60,16 @@ class FirestoreService {
   }
 
   Future<void> toggleTodo(String coupleId, TodoItem todo) {
+    final nextIsDone = !todo.isDone;
     return _db
         .collection('couples')
         .doc(coupleId)
         .collection('todos')
         .doc(todo.id)
-        .update({'isDone': !todo.isDone});
+        .update({
+      'isDone': nextIsDone,
+      'completedAt': nextIsDone ? DateTime.now().toIso8601String() : null,
+    });
   }
 
   Future<void> updateTodoDetails(
