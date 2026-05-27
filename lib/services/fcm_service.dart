@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:dio/dio.dart';
 import 'package:dart_jsonwebtoken/dart_jsonwebtoken.dart';
 import '../config/notification_config.dart';
@@ -66,8 +67,26 @@ class FcmService {
   }
 
   static Future<String?> _getPartnerToken(String partnerName) async {
-    final nameKey = partnerName.toLowerCase(); // 'ray' or 'aproo'
+    final nameKey = partnerName.toLowerCase(); // 'ray', 'aproo', or 'self'
+    
     try {
+      if (nameKey == 'self') {
+        const rayEmail = 'dwaipayanray95@gmail.com';
+        final email = FirebaseAuth.instance.currentUser?.email ?? '';
+        final myNameKey = email == rayEmail ? 'ray' : 'aproo';
+        
+        final myDoc = await FirebaseFirestore.instance
+            .collection('couples')
+            .doc('ray-aproo')
+            .collection('fcmTokens')
+            .doc(myNameKey)
+            .get();
+        if (myDoc.exists) {
+          return myDoc.data()?['token'] as String?;
+        }
+        return null;
+      }
+
       final doc = await FirebaseFirestore.instance
           .collection('couples')
           .doc('ray-aproo')
@@ -83,7 +102,7 @@ class FcmService {
     return null;
   }
 
-  static Future<void> send({
+  static Future<({bool success, String message})> send({
     required String partnerName,
     required String title,
     required String body,
@@ -95,14 +114,16 @@ class FcmService {
       
       final partnerToken = await _getPartnerToken(partnerName);
       if (partnerToken == null) {
-        LogService.log('FCM SEND cancelled: Partner token is empty');
-        return;
+        final errMsg = 'FCM SEND cancelled: Partner token is empty in Firestore';
+        LogService.log(errMsg);
+        return (success: false, message: errMsg);
       }
 
       final accessToken = await _getAccessToken();
       if (accessToken == null) {
-        LogService.log('FCM SEND cancelled: Could not retrieve OAuth2 access token');
-        return;
+        final errMsg = 'FCM SEND cancelled: Could not retrieve OAuth2 access token (check private key / service account)';
+        LogService.log(errMsg);
+        return (success: false, message: errMsg);
       }
 
       final isDataOnly = type == 'call_ping' || type == 'call_ended' || type == 'ping';
@@ -128,7 +149,6 @@ class FcmService {
             if (!isDataOnly)
               'notification': {
                 'channel_id': type == 'call_ping' ? 'tether_calls_v1' : 'tether_updates_v1',
-                'priority': 'HIGH',
               },
           },
         }
@@ -148,12 +168,21 @@ class FcmService {
       );
 
       if (response.statusCode == 200) {
-        LogService.log('FCM SEND success: Message ID ${response.data['name']}');
+        final successMsg = 'FCM SEND success: Message ID ${response.data['name']}';
+        LogService.log(successMsg);
+        return (success: true, message: successMsg);
       } else {
-        LogService.log('FCM SEND failed with status: ${response.statusCode} - ${response.data}');
+        final failMsg = 'FCM SEND failed with status: ${response.statusCode} - ${response.data}';
+        LogService.log(failMsg);
+        return (success: false, message: failMsg);
       }
     } catch (e) {
-      LogService.log('ERROR in FCM Send: $e');
+      String errMsg = 'ERROR in FCM Send: $e';
+      if (e is DioException) {
+        errMsg = 'FCM HTTP Error: ${e.response?.statusCode} - ${e.response?.data ?? e.message}';
+      }
+      LogService.log(errMsg);
+      return (success: false, message: errMsg);
     }
   }
 }

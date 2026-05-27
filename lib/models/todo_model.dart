@@ -5,6 +5,9 @@ class TodoItem {
   final bool isDone;
   final String createdBy;
   final DateTime createdAt;
+  final DateTime? dueDate;
+  final String? assignedTo;
+  final String? priority;
 
   const TodoItem({
     required this.id,
@@ -13,6 +16,9 @@ class TodoItem {
     required this.isDone,
     required this.createdBy,
     required this.createdAt,
+    this.dueDate,
+    this.assignedTo,
+    this.priority,
   });
 
   factory TodoItem.fromMap(String id, Map<String, dynamic> map) {
@@ -23,6 +29,9 @@ class TodoItem {
       isDone: map['isDone'] as bool? ?? false,
       createdBy: map['createdBy'] as String,
       createdAt: DateTime.parse(map['createdAt'] as String),
+      dueDate: map['dueDate'] != null ? DateTime.parse(map['dueDate'] as String) : null,
+      assignedTo: map['assignedTo'] as String?,
+      priority: map['priority'] as String?,
     );
   }
 
@@ -32,14 +41,27 @@ class TodoItem {
         'isDone': isDone,
         'createdBy': createdBy,
         'createdAt': createdAt.toIso8601String(),
+        if (dueDate != null) 'dueDate': dueDate!.toIso8601String(),
+        if (assignedTo != null) 'assignedTo': assignedTo,
+        if (priority != null) 'priority': priority,
       };
 
-  TodoItem copyWith({bool? isDone, String? details}) => TodoItem(
+  TodoItem copyWith({
+    bool? isDone,
+    String? details,
+    DateTime? dueDate,
+    String? assignedTo,
+    String? priority,
+  }) =>
+      TodoItem(
         id: id,
         title: title,
         details: details ?? this.details,
         isDone: isDone ?? this.isDone,
         createdBy: createdBy,
         createdAt: createdAt,
+        dueDate: dueDate ?? this.dueDate,
+        assignedTo: assignedTo ?? this.assignedTo,
+        priority: priority ?? this.priority,
       );
 }

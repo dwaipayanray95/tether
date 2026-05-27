@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/log_service.dart';
 import '../services/notification_service.dart';
+import '../services/fcm_service.dart';
+import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
 
 class DiagnosticsScreen extends StatefulWidget {
@@ -42,9 +44,21 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
           _buildSectionHeader('Testing'),
           _buildTile(
             icon: Icons.notifications_active_outlined,
-            title: 'Test Notification',
-            subtitle: 'Triggers a loud local notification',
+            title: 'Local Notification',
+            subtitle: 'Triggers a local device notification',
             onTap: _testNotification,
+          ),
+          _buildTile(
+            icon: Icons.wifi_tethering_rounded,
+            title: 'FCM Push to Self',
+            subtitle: 'Tests direct serverless FCM token loopback',
+            onTap: _testFcmSelf,
+          ),
+          _buildTile(
+            icon: Icons.favorite_rounded,
+            title: 'FCM Push to Partner',
+            subtitle: 'Sends a connection test to partner device',
+            onTap: _testFcmPartner,
           ),
         ],
       ),
@@ -115,6 +129,76 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
   Future<void> _testNotification() async {
     LogService.log('Triggering test notification');
     await NotificationService.showTest();
+  }
+
+  Future<void> _testFcmSelf() async {
+    LogService.log('Triggering test FCM to Self');
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+    final res = await FcmService.send(
+      partnerName: 'self',
+      title: '🔔 Diagnostic Test',
+      body: 'Your direct FCM pipeline is perfectly configured!',
+    );
+    if (mounted) Navigator.pop(context); // dismiss loader
+    
+    _showResultDialog(
+      title: 'FCM Self Test Result',
+      success: res.success,
+      message: res.message,
+    );
+  }
+
+  Future<void> _testFcmPartner() async {
+    final auth = AuthService();
+    final partnerName = auth.partnerName.toLowerCase();
+    LogService.log('Triggering test FCM to Partner: $partnerName');
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+    final res = await FcmService.send(
+      partnerName: partnerName,
+      title: '💖 Connection Test from ${auth.myName}',
+      body: 'Our direct connection is perfectly up and running!',
+    );
+    if (mounted) Navigator.pop(context); // dismiss loader
+    
+    _showResultDialog(
+      title: 'FCM Partner Test Result',
+      success: res.success,
+      message: res.message,
+    );
+  }
+
+  void _showResultDialog({required String title, required bool success, required String message}) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(
+              success ? Icons.check_circle_rounded : Icons.error_rounded,
+              color: success ? Colors.green : Colors.red,
+            ),
+            const SizedBox(width: 8),
+            Text(title),
+          ],
+        ),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildSectionHeader(String title) {
