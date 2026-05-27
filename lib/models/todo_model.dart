@@ -8,6 +8,7 @@ class TodoItem {
   final DateTime? dueDate;
   final String? assignedTo;
   final String? priority;
+  final DateTime? completedAt;
 
   const TodoItem({
     required this.id,
@@ -19,6 +20,7 @@ class TodoItem {
     this.dueDate,
     this.assignedTo,
     this.priority,
+    this.completedAt,
   });
 
   factory TodoItem.fromMap(String id, Map<String, dynamic> map) {
@@ -32,6 +34,7 @@ class TodoItem {
       dueDate: map['dueDate'] != null ? DateTime.parse(map['dueDate'] as String) : null,
       assignedTo: map['assignedTo'] as String?,
       priority: map['priority'] as String?,
+      completedAt: map['completedAt'] != null ? DateTime.parse(map['completedAt'] as String) : null,
     );
   }
 
@@ -44,6 +47,7 @@ class TodoItem {
         if (dueDate != null) 'dueDate': dueDate!.toIso8601String(),
         if (assignedTo != null) 'assignedTo': assignedTo,
         if (priority != null) 'priority': priority,
+        if (completedAt != null) 'completedAt': completedAt!.toIso8601String(),
       };
 
   TodoItem copyWith({
@@ -52,6 +56,7 @@ class TodoItem {
     DateTime? dueDate,
     String? assignedTo,
     String? priority,
+    DateTime? completedAt,
   }) =>
       TodoItem(
         id: id,
@@ -63,5 +68,6 @@ class TodoItem {
         dueDate: dueDate ?? this.dueDate,
         assignedTo: assignedTo ?? this.assignedTo,
         priority: priority ?? this.priority,
+        completedAt: completedAt ?? this.completedAt,
       );
 }

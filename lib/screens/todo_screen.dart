@@ -24,6 +24,7 @@ class _TodoScreenState extends State<TodoScreen> {
   final _titleCtrl = TextEditingController();
   final _detailsCtrl = TextEditingController();
   static const String _coupleId = coupleId;
+  bool _showDone = false;
 
   String get _myUid => FirebaseAuth.instance.currentUser?.uid ?? '';
 
@@ -368,6 +369,11 @@ class _TodoScreenState extends State<TodoScreen> {
           });
           final pending = todos.where((t) => !t.isDone).toList();
           final done = todos.where((t) => t.isDone).toList();
+          done.sort((a, b) {
+            final timeA = a.completedAt ?? a.createdAt;
+            final timeB = b.completedAt ?? b.createdAt;
+            return timeB.compareTo(timeA); // Most recent completed tasks at the top
+          });
 
           if (todos.isEmpty) {
             return Center(
@@ -423,35 +429,81 @@ class _TodoScreenState extends State<TodoScreen> {
               ],
               if (done.isNotEmpty) ...[
                 const SizedBox(height: 24),
-                _sectionLabel('Done'),
-                const SizedBox(height: 8),
-                Container(
-                  decoration: BoxDecoration(
-                    color: AppTheme.surface.withAlpha(200),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: AppTheme.divider),
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: Column(
-                    children: [
-                      for (int i = 0; i < done.length; i++) ...[
-                        _TodoTile(
-                          todo: done[i],
-                          coupleId: _coupleId,
-                          firestore: _firestore,
-                          onTap: () => _openDetail(done[i]),
-                          isStacked: true,
+                InkWell(
+                  onTap: () => setState(() => _showDone = !_showDone),
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            Text(
+                              'DONE',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(
+                                      color: AppTheme.textMuted,
+                                      fontWeight: FontWeight.bold,
+                                      letterSpacing: 0.8),
+                            ),
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: AppTheme.divider,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text(
+                                '${done.length}',
+                                style: const TextStyle(
+                                    fontSize: 10,
+                                    color: AppTheme.textMuted,
+                                    fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          ],
                         ),
-                        if (i < done.length - 1)
-                          const Divider(
-                            color: AppTheme.divider,
-                            height: 1,
-                            indent: 56,
-                          ),
+                        Icon(
+                          _showDone ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
+                          size: 20,
+                          color: AppTheme.textMuted,
+                        ),
                       ],
-                    ],
+                    ),
                   ),
                 ),
+                const SizedBox(height: 8),
+                if (_showDone)
+                  Container(
+                    decoration: BoxDecoration(
+                      color: AppTheme.surface.withAlpha(200),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: AppTheme.divider),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: Column(
+                      children: [
+                        for (int i = 0; i < done.length; i++) ...[
+                          _TodoTile(
+                            todo: done[i],
+                            coupleId: _coupleId,
+                            firestore: _firestore,
+                            onTap: () => _openDetail(done[i]),
+                            isStacked: true,
+                          ),
+                          if (i < done.length - 1)
+                            const Divider(
+                              color: AppTheme.divider,
+                              height: 1,
+                              indent: 56,
+                            ),
+                        ],
+                      ],
+                    ),
+                  ),
               ],
             ],
           );
