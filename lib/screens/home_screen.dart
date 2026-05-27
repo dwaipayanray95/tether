@@ -221,8 +221,6 @@ class _HomeScreenState extends State<HomeScreen>
               const SizedBox(height: 28),
               _buildDistanceCard(),
               const SizedBox(height: 20),
-              _buildLastSeen(),
-              const SizedBox(height: 20),
               _buildMusicCard(),
               const SizedBox(height: 20),
               _buildPokeCard(),
@@ -245,6 +243,10 @@ class _HomeScreenState extends State<HomeScreen>
             ? 'Good afternoon'
             : 'Good evening';
 
+    final partnerName = _auth.partnerName;
+    final partnerOnline = _auth.isRay ? _aprooIsOnline : _rayIsOnline;
+    final partnerLastSeen = _auth.isRay ? _aprooLastSeen : _rayLastSeen;
+
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
@@ -262,6 +264,32 @@ class _HomeScreenState extends State<HomeScreen>
                   fontWeight: FontWeight.w700,
                   color: AppTheme.textDark,
                 )),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Container(
+                  width: 7,
+                  height: 7,
+                  decoration: BoxDecoration(
+                    color: partnerOnline ? Colors.green : AppTheme.textMuted.withValues(alpha: 0.5),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  partnerOnline
+                      ? '$partnerName is active now'
+                      : (partnerLastSeen == null
+                          ? '$partnerName is offline'
+                          : '$partnerName was active ${timeago.format(partnerLastSeen.toDate(), locale: 'en_short')}'),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: AppTheme.textMuted,
+                  ),
+                ),
+              ],
+            ),
           ],
         ),
         Row(
@@ -393,66 +421,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  Widget _buildLastSeen() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.divider),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-              child: _lastSeenTile('Raayyy', _rayIsOnline, _rayLastSeen)),
-          Container(
-              width: 1,
-              height: 36,
-              color: AppTheme.divider,
-              margin: const EdgeInsets.symmetric(horizontal: 12)),
-          Expanded(
-              child:
-                  _lastSeenTile('Aproo', _aprooIsOnline, _aprooLastSeen)),
-        ],
-      ),
-    );
-  }
 
-  Widget _lastSeenTile(String name, bool isOnline, Timestamp? ts) {
-    final label = isOnline
-        ? 'Active now'
-        : (ts == null
-            ? 'Never seen'
-            : timeago.format(ts.toDate(), locale: 'en_short'));
-
-    return Column(
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 8,
-              height: 8,
-              decoration: BoxDecoration(
-                color: isOnline
-                    ? Colors.green
-                    : AppTheme.textMuted.withValues(alpha: 0.35),
-                shape: BoxShape.circle,
-              ),
-            ),
-            const SizedBox(width: 6),
-            Text(name,
-                style: const TextStyle(
-                    fontSize: 13, fontWeight: FontWeight.w600)),
-          ],
-        ),
-        const SizedBox(height: 3),
-        Text(label,
-            style:
-                const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
-      ],
-    );
-  }
 
   Widget _buildPokeCard() {
     final myUid = _auth.currentUser?.uid;
