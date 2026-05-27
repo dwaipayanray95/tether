@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.os.Build
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -66,7 +67,11 @@ class MainActivity : FlutterActivity() {
             addAction("com.spotify.music.metadatachanged")
         }
 
-        registerReceiver(musicReceiver, filter)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(musicReceiver, filter, Context.RECEIVER_EXPORTED)
+        } else {
+            registerReceiver(musicReceiver, filter)
+        }
     }
 
     private fun unregisterMusicReceiver() {
