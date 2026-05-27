@@ -1,8 +1,10 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'home_screen.dart';
 import 'chat_screen.dart';
 import 'todo_screen.dart';
@@ -76,42 +78,130 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       LogService.log('Error requesting standard batch: $e');
     }
 
-    // 2. Request Background Location only if Foreground Location is granted (Mandatory OS requirement)
-    try {
-      final isForegroundGranted = standardStatuses[Permission.location]?.isGranted ?? 
-                                  await Permission.location.isGranted;
-      if (isForegroundGranted) {
-        LogService.log('Foreground location granted. Requesting Background Location...');
-        final alwaysStatus = await Permission.locationAlways.request();
-        LogService.log('Background Location Status: $alwaysStatus');
-      }
-    } catch (e) {
-      LogService.log('Error requesting Background Location: $e');
-    }
+    // 2. Kick off the interactive background/special settings permission prompts
+    _checkSpecialPermissions();
+  }
 
-    // 3. For System Alert Window (Draw Over Other Apps), redirect to settings if denied
+  Future<void> _checkSpecialPermissions() async {
     try {
-      final overlayGranted = await Permission.systemAlertWindow.isGranted;
-      if (!overlayGranted) {
-        LogService.log('Draw Over Apps denied. Prompting user to enable in settings...');
-        final status = await Permission.systemAlertWindow.request();
-        LogService.log('Draw Over Apps Request Status: $status');
-      }
-    } catch (e) {
-      LogService.log('Error requesting Draw Over Apps permission: $e');
-    }
+      final isLocationAlwaysGranted = await Permission.locationAlways.isGranted;
+      final isOverlayGranted = await Permission.systemAlertWindow.isGranted;
+      final isAlarmGranted = await Permission.scheduleExactAlarm.isGranted;
 
-    // 4. For Exact Alarms, redirect to settings if denied (Android 12+)
-    try {
-      final alarmGranted = await Permission.scheduleExactAlarm.isGranted;
-      if (!alarmGranted) {
-        LogService.log('Schedule Exact Alarms denied. Prompting user to enable in settings...');
-        final status = await Permission.scheduleExactAlarm.request();
-        LogService.log('Schedule Exact Alarms Request Status: $status');
+      // Foreground location must be granted before requesting background location
+      final isForegroundGranted = await Permission.location.isGranted;
+
+      if (isForegroundGranted && !isLocationAlwaysGranted) {
+        _showPermissionPrompt(
+          title: '📍 Background Location Always',
+          description: 'Tether needs "Allow all the time" location access so you and your partner can see each other\'s distance even when the app is closed.',
+          permission: Permission.locationAlways,
+        );
+        return; // Prompt one at a time to prevent overlay clutter
+      }
+
+      if (!isOverlayGranted) {
+        _showPermissionPrompt(
+          title: '📞 Display Over Other Apps',
+          description: 'Enable drawing over other apps to allow Tether to display full-screen calls and pokes instantly even when your phone is locked or you are using another app.',
+          permission: Permission.systemAlertWindow,
+        );
+        return;
+      }
+
+      if (!isAlarmGranted) {
+        _showPermissionPrompt(
+          title: '⏰ Exact Alarm Schedule',
+          description: 'Enable Exact Alarms to ensure Tether can schedule precise background checks and updates, keeping you and your partner perfectly connected.',
+          permission: Permission.scheduleExactAlarm,
+        );
+        return;
       }
     } catch (e) {
-      LogService.log('Error requesting Schedule Exact Alarms: $e');
+      LogService.log('Error checking special permissions: $e');
     }
+  }
+
+  void _showPermissionPrompt({
+    required String title,
+    required String description,
+    required Permission permission,
+  }) {
+    showModalBottomSheet(
+      context: context,
+      isDismissible: false,
+      enableDrag: false,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => PopScope(
+        canPop: false, // Prevent dismissing by tapping outside or back button
+        child: Container(
+          margin: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(28),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.08),
+                blurRadius: 20,
+                spreadRadius: 4,
+              )
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                title,
+                style: GoogleFonts.playfairDisplay(
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.textDark,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                description,
+                style: GoogleFonts.dmSans(
+                  fontSize: 14,
+                  color: AppTheme.textMuted,
+                  height: 1.5,
+                ),
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  elevation: 0,
+                ),
+                onPressed: () async {
+                  Navigator.pop(ctx);
+                  HapticFeedback.mediumImpact();
+                  await permission.request();
+                  // Re-check permissions sequentially after returning from settings
+                  Future.delayed(const Duration(milliseconds: 1000), () {
+                    if (mounted) _checkSpecialPermissions();
+                  });
+                },
+                child: Text(
+                  'Enable in Settings',
+                  style: GoogleFonts.dmSans(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   // ── Pending notification ──────────────────────────────────────────────────
