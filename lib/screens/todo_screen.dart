@@ -4,8 +4,10 @@ import 'package:uuid/uuid.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import '../models/todo_model.dart';
 import '../models/comment_model.dart';
+import 'package:intl/intl.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
+import '../services/notification_service.dart';
 import '../services/log_service.dart';
 import '../theme/app_theme.dart';
 
@@ -28,6 +30,10 @@ class _TodoScreenState extends State<TodoScreen> {
   void _showAddDialog() {
     _titleCtrl.clear();
     _detailsCtrl.clear();
+    DateTime? selectedDueDate;
+    String? selectedPriority;
+    String? selectedAssignedTo;
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -35,52 +41,276 @@ class _TodoScreenState extends State<TodoScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.only(
-          left: 24,
-          right: 24,
-          top: 24,
-          bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Add to list', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _titleCtrl,
-              autofocus: true,
-              decoration: const InputDecoration(hintText: 'What needs doing?'),
-              textCapitalization: TextCapitalization.sentences,
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _detailsCtrl,
-              maxLines: 3,
-              decoration: const InputDecoration(
-                hintText: 'Add details (optional)',
-                alignLabelWithHint: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setState) {
+          Future<void> pickDueDateTime() async {
+            final date = await showDatePicker(
+              context: context,
+              initialDate: selectedDueDate ?? DateTime.now(),
+              firstDate: DateTime.now().subtract(const Duration(days: 1)),
+              lastDate: DateTime.now().add(const Duration(days: 365)),
+              builder: (context, child) => Theme(
+                data: Theme.of(context).copyWith(
+                  colorScheme: const ColorScheme.light(
+                    primary: AppTheme.primary,
+                    onPrimary: Colors.white,
+                    onSurface: AppTheme.textDark,
+                  ),
+                ),
+                child: child!,
               ),
-              textCapitalization: TextCapitalization.sentences,
+            );
+            if (date == null) return;
+
+            if (!context.mounted) return;
+            final time = await showTimePicker(
+              context: context,
+              initialTime: TimeOfDay.fromDateTime(selectedDueDate ?? DateTime.now()),
+              builder: (context, child) => Theme(
+                data: Theme.of(context).copyWith(
+                  colorScheme: const ColorScheme.light(
+                    primary: AppTheme.primary,
+                    onPrimary: Colors.white,
+                    onSurface: AppTheme.textDark,
+                  ),
+                ),
+                child: child!,
+              ),
+            );
+            if (time == null) return;
+
+            setState(() {
+              selectedDueDate = DateTime(date.year, date.month, date.day, time.hour, time.minute);
+            });
+          }
+
+          return Padding(
+            padding: EdgeInsets.only(
+              left: 24,
+              right: 24,
+              top: 24,
+              bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
             ),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(onPressed: _add, child: const Text('Add')),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Add to list', style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _titleCtrl,
+                    autofocus: true,
+                    decoration: const InputDecoration(hintText: 'What needs doing?'),
+                    textCapitalization: TextCapitalization.sentences,
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _detailsCtrl,
+                    maxLines: 2,
+                    decoration: const InputDecoration(
+                      hintText: 'Add details (optional)',
+                      alignLabelWithHint: true,
+                    ),
+                    textCapitalization: TextCapitalization.sentences,
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Assignee Selector
+                  Text('Assign to',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: AppTheme.textMuted, letterSpacing: 0.3)),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      _buildChipOption(
+                        label: 'Both',
+                        selected: selectedAssignedTo == null,
+                        onTap: () => setState(() => selectedAssignedTo = null),
+                      ),
+                      const SizedBox(width: 8),
+                      _buildChipOption(
+                        label: 'Ray',
+                        selected: selectedAssignedTo == 'ray',
+                        onTap: () => setState(() => selectedAssignedTo = 'ray'),
+                      ),
+                      const SizedBox(width: 8),
+                      _buildChipOption(
+                        label: 'Aproo',
+                        selected: selectedAssignedTo == 'aproo',
+                        onTap: () => setState(() => selectedAssignedTo = 'aproo'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Priority Selector
+                  Text('Priority',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: AppTheme.textMuted, letterSpacing: 0.3)),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      _buildChipOption(
+                        label: 'None',
+                        selected: selectedPriority == null,
+                        onTap: () => setState(() => selectedPriority = null),
+                      ),
+                      const SizedBox(width: 8),
+                      _buildChipOption(
+                        label: 'Low',
+                        selected: selectedPriority == 'low',
+                        color: Colors.blue.shade100,
+                        selectedColor: Colors.blue.shade600,
+                        onTap: () => setState(() => selectedPriority = 'low'),
+                      ),
+                      const SizedBox(width: 8),
+                      _buildChipOption(
+                        label: 'Medium',
+                        selected: selectedPriority == 'medium',
+                        color: Colors.amber.shade100,
+                        selectedColor: Colors.amber.shade700,
+                        onTap: () => setState(() => selectedPriority = 'medium'),
+                      ),
+                      const SizedBox(width: 8),
+                      _buildChipOption(
+                        label: 'High',
+                        selected: selectedPriority == 'high',
+                        color: AppTheme.primaryLight,
+                        selectedColor: AppTheme.primary,
+                        onTap: () => setState(() => selectedPriority = 'high'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Due Date & Time Picker
+                  Text('Due Date & Time',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: AppTheme.textMuted, letterSpacing: 0.3)),
+                  const SizedBox(height: 8),
+                  InkWell(
+                    onTap: pickDueDateTime,
+                    borderRadius: BorderRadius.circular(12),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: AppTheme.divider),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.calendar_today_rounded,
+                            size: 18,
+                            color: selectedDueDate != null ? AppTheme.primary : AppTheme.textMuted,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              selectedDueDate != null
+                                  ? DateFormat('MMM d, yyyy  ·  h:mm a').format(selectedDueDate!)
+                                  : 'No due date set',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: selectedDueDate != null ? AppTheme.textDark : AppTheme.textMuted,
+                                fontWeight: selectedDueDate != null ? FontWeight.w500 : FontWeight.normal,
+                              ),
+                            ),
+                          ),
+                          if (selectedDueDate != null)
+                            GestureDetector(
+                              onTap: () => setState(() => selectedDueDate = null),
+                              child: const Icon(Icons.close, size: 18, color: AppTheme.textMuted),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        final title = _titleCtrl.text.trim();
+                        if (title.isEmpty) return;
+                        final details = _detailsCtrl.text.trim();
+                        _add(
+                          title: title,
+                          details: details,
+                          dueDate: selectedDueDate,
+                          assignedTo: selectedAssignedTo,
+                          priority: selectedPriority,
+                        );
+                        Navigator.pop(ctx);
+                      },
+                      child: const Text('Add Task'),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildChipOption({
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+    Color? color,
+    Color? selectedColor,
+  }) {
+    final isDefault = color == null;
+    final bg = selected
+        ? (selectedColor ?? AppTheme.primary)
+        : (isDefault ? Colors.transparent : color.withAlpha(76)); // 0.3 * 255
+    final fg = selected
+        ? Colors.white
+        : (isDefault ? AppTheme.textDark : (selectedColor ?? AppTheme.primary));
+    final border = selected
+        ? Border.all(color: Colors.transparent)
+        : Border.all(color: isDefault ? AppTheme.divider : color.withAlpha(127)); // 0.5 * 255
+
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: bg,
+          border: border,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: fg,
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
+          ),
         ),
       ),
     );
   }
 
-  Future<void> _add() async {
-    final title = _titleCtrl.text.trim();
-    if (title.isEmpty) return;
-    final details = _detailsCtrl.text.trim();
+  Future<void> _add({
+    required String title,
+    required String details,
+    DateTime? dueDate,
+    String? assignedTo,
+    String? priority,
+  }) async {
     LogService.log('Adding new to-do: $title');
-    Navigator.pop(context);
     await _firestore.addTodo(
       _coupleId,
       TodoItem(
@@ -90,6 +320,9 @@ class _TodoScreenState extends State<TodoScreen> {
         isDone: false,
         createdBy: _myUid,
         createdAt: DateTime.now(),
+        dueDate: dueDate,
+        assignedTo: assignedTo,
+        priority: priority,
       ),
     );
   }
@@ -130,6 +363,9 @@ class _TodoScreenState extends State<TodoScreen> {
             return const Center(child: CircularProgressIndicator());
           }
           final todos = snap.data!;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            NotificationService.syncTodoNotifications(todos);
+          });
           final pending = todos.where((t) => !t.isDone).toList();
           final done = todos.where((t) => t.isDone).toList();
 
@@ -206,23 +442,159 @@ class _TodoTile extends StatelessWidget {
     required this.onTap,
   });
 
+  Widget _buildPriorityIndicator(String priority) {
+    Color color;
+    String label;
+    switch (priority) {
+      case 'high':
+        color = AppTheme.primary;
+        label = 'High';
+        break;
+      case 'medium':
+        color = Colors.amber.shade700;
+        label = 'Medium';
+        break;
+      case 'low':
+        color = Colors.blue.shade600;
+        label = 'Low';
+        break;
+      default:
+        return const SizedBox.shrink();
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withAlpha(30), // 0.12 * 255
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w600),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDueDateIndicator(DateTime dueDate, bool isDone) {
+    final isOverdue = !isDone && dueDate.isBefore(DateTime.now());
+    final color = isOverdue ? AppTheme.primary : AppTheme.textMuted;
+    final bg = isOverdue ? AppTheme.primaryLight : AppTheme.divider;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.access_time_filled_rounded, size: 10, color: color),
+          const SizedBox(width: 4),
+          Text(
+            DateFormat('MMM d, h:mm a').format(dueDate),
+            style: TextStyle(
+              color: color,
+              fontSize: 10,
+              fontWeight: isOverdue ? FontWeight.w600 : FontWeight.normal,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAssigneeIndicator(String assignedTo) {
+    final label = assignedTo == 'ray' ? 'Ray' : 'Aproo';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: AppTheme.primaryLight,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        '👤 $label',
+        style: const TextStyle(
+          color: AppTheme.primary,
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
+  void _confirmDeleteTodo(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Task?'),
+        content: Text('Are you sure you want to permanently delete "${todo.title}"?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              NotificationService.cancelTodoReminder(todo.id);
+              firestore.deleteTodo(coupleId, todo.id);
+            },
+            child: const Text('Delete', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final swipeColor = todo.isDone ? Colors.amber.shade50 : Colors.green.shade50;
+    final swipeIcon = todo.isDone ? Icons.undo_rounded : Icons.check_circle_outline_rounded;
+    final swipeIconColor = todo.isDone ? Colors.amber.shade800 : Colors.green.shade600;
+
+    final swipeBackground = Container(
+      alignment: Alignment.centerLeft,
+      padding: const EdgeInsets.only(left: 20),
+      decoration: BoxDecoration(
+        color: swipeColor,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Icon(swipeIcon, color: swipeIconColor),
+    );
+
+    final swipeSecondaryBackground = Container(
+      alignment: Alignment.centerRight,
+      padding: const EdgeInsets.only(right: 20),
+      decoration: BoxDecoration(
+        color: swipeColor,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Icon(swipeIcon, color: swipeIconColor),
+    );
+
     return Dismissible(
       key: Key(todo.id),
-      direction: DismissDirection.endToStart,
-      background: Container(
-        alignment: Alignment.centerRight,
-        padding: const EdgeInsets.only(right: 20),
-        decoration: BoxDecoration(
-          color: Colors.red.shade50,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: const Icon(Icons.delete_outline, color: Colors.red),
-      ),
-      onDismissed: (_) => firestore.deleteTodo(coupleId, todo.id),
+      direction: DismissDirection.horizontal,
+      background: swipeBackground,
+      secondaryBackground: swipeSecondaryBackground,
+      confirmDismiss: (direction) async {
+        await firestore.toggleTodo(coupleId, todo);
+        return false; // Prevents the tile from disappearing, triggers beautiful slide-back
+      },
       child: GestureDetector(
         onTap: onTap,
+        onLongPress: () => _confirmDeleteTodo(context),
         child: Container(
           margin: const EdgeInsets.only(bottom: 8),
           decoration: BoxDecoration(
@@ -232,7 +604,7 @@ class _TodoTile extends StatelessWidget {
           ),
           child: ListTile(
             contentPadding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             leading: GestureDetector(
               onTap: () => firestore.toggleTodo(coupleId, todo),
               child: AnimatedContainer(
@@ -261,15 +633,38 @@ class _TodoTile extends StatelessWidget {
                 fontWeight: FontWeight.w500,
               ),
             ),
-            subtitle: todo.details != null && todo.details!.isNotEmpty
+            subtitle: (todo.details != null && todo.details!.isNotEmpty) ||
+                    todo.dueDate != null ||
+                    todo.priority != null ||
+                    todo.assignedTo != null
                 ? Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Text(
-                      todo.details!,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontSize: 12, color: AppTheme.textMuted),
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (todo.details != null && todo.details!.isNotEmpty) ...[
+                          Text(
+                            todo.details!,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                fontSize: 12, color: AppTheme.textMuted),
+                          ),
+                          const SizedBox(height: 6),
+                        ],
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 4,
+                          children: [
+                            if (todo.priority != null)
+                              _buildPriorityIndicator(todo.priority!),
+                            if (todo.dueDate != null)
+                              _buildDueDateIndicator(todo.dueDate!, todo.isDone),
+                            if (todo.assignedTo != null)
+                              _buildAssigneeIndicator(todo.assignedTo!),
+                          ],
+                        ),
+                      ],
                     ),
                   )
                 : null,
@@ -360,7 +755,6 @@ class _TodoDetailSheetState extends State<_TodoDetailSheet> {
   }
 
   void _confirmDeleteComment(String commentId, String authorName) {
-    if (authorName != widget.myName) return; // can only delete own comments
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -544,9 +938,7 @@ class _TodoDetailSheetState extends State<_TodoDetailSheet> {
                     final c = comments[i];
                     final isMe = c.authorName == widget.myName;
                     return GestureDetector(
-                      onLongPress: isMe
-                          ? () => _confirmDeleteComment(c.id, c.authorName)
-                          : null,
+                      onLongPress: () => _confirmDeleteComment(c.id, c.authorName),
                       child: Padding(
                         padding: const EdgeInsets.only(bottom: 10),
                         child: Row(
@@ -566,6 +958,17 @@ class _TodoDetailSheetState extends State<_TodoDetailSheet> {
                                         fontWeight: FontWeight.w600)),
                               ),
                               const SizedBox(width: 8),
+                            ],
+                            if (isMe) ...[
+                              GestureDetector(
+                                onTap: () => _confirmDeleteComment(c.id, c.authorName),
+                                child: const Padding(
+                                  padding: EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                                  child: Icon(Icons.more_vert,
+                                      size: 16, color: AppTheme.textMuted),
+                                ),
+                              ),
+                              const SizedBox(width: 4),
                             ],
                             Flexible(
                               child: Container(
@@ -612,10 +1015,16 @@ class _TodoDetailSheetState extends State<_TodoDetailSheet> {
                                 ),
                               ),
                             ),
-                            if (isMe) ...[
-                              const SizedBox(width: 8),
-                              const Icon(Icons.more_vert,
-                                  size: 14, color: AppTheme.textMuted),
+                            if (!isMe) ...[
+                              const SizedBox(width: 4),
+                              GestureDetector(
+                                onTap: () => _confirmDeleteComment(c.id, c.authorName),
+                                child: const Padding(
+                                  padding: EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                                  child: Icon(Icons.more_vert,
+                                      size: 16, color: AppTheme.textMuted),
+                                ),
+                              ),
                             ],
                           ],
                         ),

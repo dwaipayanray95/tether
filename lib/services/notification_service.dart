@@ -4,6 +4,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:timezone/data/latest.dart' as tz;
+import 'package:timezone/timezone.dart' as tz;
+import '../models/todo_model.dart';
 import 'nav_service.dart';
 import 'location_service.dart';
 import 'auth_service.dart';
@@ -61,6 +64,7 @@ class NotificationService {
 
   static Future<void> initialize() async {
     LogService.log('Initializing NotificationService');
+    tz.initializeTimeZones();
     await _messaging.requestPermission(alert: true, badge: true, sound: true);
 
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
@@ -219,5 +223,67 @@ class NotificationService {
         .collection('fcmTokens')
         .doc(myName)
         .set({'token': token});
+  }
+
+  // ── Todo Reminders ────────────────────────────────────────────────────────
+
+  static Future<void> scheduleTodoReminder(TodoItem todo) async {
+    if (todo.dueDate == null || todo.isDone) return;
+    if (todo.dueDate!.isBefore(DateTime.now())) return;
+
+    LogService.log('Scheduling local notification for to-do ${todo.id} at ${todo.dueDate}');
+    final scheduledDate = tz.TZDateTime.from(todo.dueDate!, tz.local);
+
+    await _local.zonedSchedule(
+      todo.id.hashCode,
+      '⏰ Task Reminder',
+      todo.title,
+      scheduledDate,
+      NotificationDetails(
+        android: AndroidNotificationDetails(
+          _defaultChannel.id,
+          _defaultChannel.name,
+          channelDescription: _defaultChannel.description,
+          importance: Importance.max,
+          priority: Priority.max,
+          playSound: true,
+          enableVibration: true,
+          icon: '@mipmap/ic_launcher',
+        ),
+      ),
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      uiLocalNotificationDateInterpretation:
+          UILocalNotificationDateInterpretation.absoluteTime,
+    );
+  }
+
+  static Future<void> cancelTodoReminder(String todoId) async {
+    LogService.log('Canceling local notification for to-do $todoId');
+    await _local.cancel(todoId.hashCode);
+  }
+
+  static Future<void> syncTodoNotifications(List<TodoItem> todos) async {
+    try {
+      final pending = await _local.pendingNotificationRequests();
+      final activeTodoHashCodes = todos
+          .where((t) => !t.isDone && t.dueDate != null && t.dueDate!.isAfter(DateTime.now()))
+          .map((t) => t.id.hashCode)
+          .toSet();
+
+      for (final p in pending) {
+        // Only manage todo notification hashes (skip other notifications if any)
+        if (!activeTodoHashCodes.contains(p.id)) {
+          await _local.cancel(p.id);
+        }
+      }
+
+      for (final todo in todos) {
+        if (!todo.isDone && todo.dueDate != null && todo.dueDate!.isAfter(DateTime.now())) {
+          await scheduleTodoReminder(todo);
+        }
+      }
+    } catch (e) {
+      LogService.log('Error syncing todo notifications: $e');
+    }
   }
 }
