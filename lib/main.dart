@@ -6,6 +6,7 @@ import 'screens/main_shell.dart';
 import 'services/notification_service.dart';
 import 'services/nav_service.dart';
 import 'services/log_service.dart';
+import 'services/music_sync_service.dart';
 import 'theme/app_theme.dart';
 
 void main() async {
@@ -43,6 +44,7 @@ class TetherApp extends StatelessWidget {
           if (snapshot.hasData) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
               NotificationService.initialize();
+              MusicSyncService.init();
             });
             return const MainShell();
           }
