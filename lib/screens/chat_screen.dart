@@ -392,10 +392,13 @@ class ChatScreenState extends State<ChatScreen> {
                         ignoring: !_showScrollToBottom,
                         child: FloatingActionButton.small(
                           onPressed: _scrollToBottom,
-                          backgroundColor: AppTheme.primary,
-                          foregroundColor: Colors.white,
-                          elevation: 2,
-                          child: const Icon(Icons.keyboard_arrow_down_rounded),
+                          backgroundColor: Colors.white,
+                          foregroundColor: AppTheme.primary,
+                          elevation: 3,
+                          shape: CircleBorder(
+                            side: BorderSide(color: AppTheme.divider, width: 0.5),
+                          ),
+                          child: const Icon(Icons.keyboard_arrow_down_rounded, size: 22),
                         ),
                       ),
                     ),
@@ -509,27 +512,50 @@ class ChatScreenState extends State<ChatScreen> {
           children: [
             if (_replyTo != null)
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                color: AppTheme.primaryLight,
-                child: Row(
+                margin: const EdgeInsets.fromLTRB(16, 12, 16, 2),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryLight,
+                  borderRadius: BorderRadius.circular(12),
+                  border: const Border(
+                    left: BorderSide(color: AppTheme.primary, width: 4),
+                  ),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.reply_rounded,
-                        size: 16, color: AppTheme.primary),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        _replyTo!.text,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontSize: 13, color: AppTheme.textMuted),
-                      ),
+                    Row(
+                      children: [
+                        const Icon(Icons.reply_rounded,
+                            size: 14, color: AppTheme.primary),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Replying to ${_replyTo!.senderId == _myUid ? "yourself" : _auth.partnerName}',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: AppTheme.primary,
+                            letterSpacing: 0.2,
+                          ),
+                        ),
+                        const Spacer(),
+                        GestureDetector(
+                          onTap: _clearReply,
+                          child: const Icon(Icons.close_rounded,
+                              size: 16, color: AppTheme.textMuted),
+                        ),
+                      ],
                     ),
-                    GestureDetector(
-                      onTap: _clearReply,
-                      child: const Icon(Icons.close,
-                          size: 16, color: AppTheme.textMuted),
+                    const SizedBox(height: 4),
+                    Text(
+                      _replyTo!.text,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 13,
+                          color: AppTheme.textDark,
+                          height: 1.2),
                     ),
                   ],
                 ),
@@ -543,23 +569,46 @@ class ChatScreenState extends State<ChatScreen> {
                       controller: _textCtrl,
                       minLines: 1,
                       maxLines: 6,
-                      decoration: const InputDecoration(
+                      style: const TextStyle(fontSize: 15),
+                      decoration: InputDecoration(
                         hintText: 'Message...',
-                        contentPadding: EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 10),
+                        hintStyle: const TextStyle(color: AppTheme.textMuted),
+                        filled: true,
+                        fillColor: const Color(0xFFF3EFEF),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 18, vertical: 11),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide: BorderSide.none,
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide: BorderSide.none,
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide: const BorderSide(color: AppTheme.primary, width: 1.0),
+                        ),
                       ),
                       textCapitalization: TextCapitalization.sentences,
                       onSubmitted: (_) => _send(),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 10),
                   GestureDetector(
                     onTap: _send,
                     child: Container(
                       padding: const EdgeInsets.all(12),
-                      decoration: const BoxDecoration(
+                      decoration: BoxDecoration(
                         color: AppTheme.primary,
                         shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppTheme.primary.withValues(alpha: 0.25),
+                            blurRadius: 6,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
                       ),
                       child: const Icon(Icons.send_rounded,
                           color: Colors.white, size: 18),
@@ -988,31 +1037,46 @@ class _MessageBubble extends StatelessWidget {
                             child: Container(
                               margin: const EdgeInsets.only(bottom: 6),
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 4),
+                                  horizontal: 10, vertical: 6),
                               decoration: BoxDecoration(
                                 color: isMe
-                                    ? Colors.white.withValues(alpha: 0.2)
-                                    : AppTheme.primaryLight,
-                                borderRadius: BorderRadius.circular(8),
+                                    ? Colors.white.withValues(alpha: 0.16)
+                                    : AppTheme.primaryLight.withValues(alpha: 0.75),
+                                borderRadius: const BorderRadius.all(Radius.circular(6)),
                                 border: Border(
                                   left: BorderSide(
                                     color: isMe
-                                        ? Colors.white
+                                        ? Colors.white.withValues(alpha: 0.85)
                                         : AppTheme.primary,
-                                    width: 3,
+                                    width: 3.5,
                                   ),
                                 ),
                               ),
-                              child: Text(
-                                message.replyToText!,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: isMe
-                                      ? Colors.white70
-                                      : AppTheme.textMuted,
-                                ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.reply_rounded,
+                                    size: 12,
+                                    color: isMe
+                                        ? Colors.white70
+                                        : AppTheme.primary,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Flexible(
+                                    child: Text(
+                                      message.replyToText!,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: isMe
+                                            ? Colors.white.withValues(alpha: 0.9)
+                                            : AppTheme.textMuted,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           ),
