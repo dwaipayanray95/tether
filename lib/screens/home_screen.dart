@@ -1359,12 +1359,17 @@ class _StickyNoteTile extends StatelessWidget {
                         ),
                       ),
                       if (date != null)
-                        Text(
-                          DateFormat('d MMMM y, h:mm a').format(date!),
-                          style: GoogleFonts.dmSans(
-                            fontSize: 10,
-                            color: const Color(0xFF8C7A76),
-                          ),
+                        Builder(
+                          builder: (context) {
+                            final istDate = date!.toUtc().add(const Duration(hours: 5, minutes: 30));
+                            return Text(
+                              '${DateFormat('d MMMM y, h:mm a').format(istDate)} IST',
+                              style: GoogleFonts.dmSans(
+                                fontSize: 10,
+                                color: const Color(0xFF8C7A76),
+                              ),
+                            );
+                          }
                         ),
                     ],
                   ),
@@ -1492,12 +1497,17 @@ class _StickyNoteTile extends StatelessWidget {
                           ),
                         ),
                         if (date != null)
-                          Text(
-                            DateFormat('d MMM').format(date!),
-                            style: GoogleFonts.dmSans(
-                              fontSize: 9,
-                              color: const Color(0xFF8C7A76),
-                            ),
+                          Builder(
+                            builder: (context) {
+                              final istDate = date!.toUtc().add(const Duration(hours: 5, minutes: 30));
+                              return Text(
+                                DateFormat('d MMM').format(istDate),
+                                style: GoogleFonts.dmSans(
+                                  fontSize: 9,
+                                  color: const Color(0xFF8C7A76),
+                                ),
+                              );
+                            }
                           ),
                       ],
                     ),
