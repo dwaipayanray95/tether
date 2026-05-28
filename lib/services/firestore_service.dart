@@ -5,6 +5,7 @@ import '../models/comment_model.dart';
 import '../models/message_model.dart';
 import 'fcm_service.dart';
 import 'log_service.dart';
+import 'auth_service.dart';
 
 class FirestoreService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -44,6 +45,16 @@ class FirestoreService {
             snap.docs.map((d) => TodoItem.fromMap(d.id, d.data())).toList());
   }
 
+  Stream<TodoItem> todoDocStream(String coupleId, String todoId) {
+    return _db
+        .collection('couples')
+        .doc(coupleId)
+        .collection('todos')
+        .doc(todoId)
+        .snapshots()
+        .map((d) => TodoItem.fromMap(d.id, d.data() ?? {}));
+  }
+
   Future<void> addTodo(String coupleId, TodoItem todo) async {
     LogService.log('Adding to-do: ${todo.title}');
     await _db
@@ -51,11 +62,13 @@ class FirestoreService {
         .doc(coupleId)
         .collection('todos')
         .add(todo.toMap());
-    final partnerName = todo.createdBy == 'Ray' ? 'aproo' : 'ray';
+    final auth = AuthService();
+    final senderName = auth.myName;
+    final partnerName = auth.partnerName.toLowerCase();
     FcmService.send(
       partnerName: partnerName,
       title: '✅ New task added',
-      body: '${todo.createdBy}: ${todo.title}',
+      body: '$senderName: ${todo.title}',
       type: 'todo',
     );
   }
@@ -87,6 +100,18 @@ class FirestoreService {
         .collection('todos')
         .doc(todoId)
         .update({'details': details});
+  }
+
+  Future<void> updateTodoChecklist(
+      String coupleId, String todoId, List<ChecklistItem> checklist) {
+    return _db
+        .collection('couples')
+        .doc(coupleId)
+        .collection('todos')
+        .doc(todoId)
+        .update({
+      'checklist': checklist.map((item) => item.toMap()).toList(),
+    });
   }
 
   Future<void> deleteTodo(String coupleId, String todoId) {
