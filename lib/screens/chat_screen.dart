@@ -375,12 +375,7 @@ class ChatScreenState extends State<ChatScreen> {
                     ),
                     GestureDetector(
                       onTap: () {
-                        if (_searchQuery.isNotEmpty) {
-                          _searchCtrl.clear();
-                          setState(() => _searchQuery = '');
-                        } else {
-                          closeSearch();
-                        }
+                        closeSearch();
                       },
                       child: Container(
                         padding: const EdgeInsets.all(4),

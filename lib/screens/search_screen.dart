@@ -126,12 +126,7 @@ class _SearchScreenState extends State<SearchScreen> {
                 ),
                 GestureDetector(
                   onTap: () {
-                    if (_query.isNotEmpty) {
-                      _searchCtrl.clear();
-                      setState(() => _query = '');
-                    } else {
-                      Navigator.pop(context);
-                    }
+                    Navigator.pop(context);
                   },
                   child: Container(
                     padding: const EdgeInsets.all(4),
