@@ -72,7 +72,6 @@ class ChatScreenState extends State<ChatScreen> {
   bool _initialLoading = true;
   StreamSubscription<List<Message>>? _streamSub;
   StreamSubscription? _presenceSub;
-  bool _partnerIsOnline = false;
   DateTime? _partnerLastSeen;
 
   // Highlight
@@ -155,7 +154,6 @@ class ChatScreenState extends State<ChatScreen> {
         final p = data[partnerKey] as Map<String, dynamic>?;
         if (p != null) {
           setState(() {
-            _partnerIsOnline = p['isOnline'] as bool? ?? false;
             _partnerLastSeen = (p['lastSeen'] as Timestamp?)?.toDate();
           });
         }
@@ -268,6 +266,8 @@ class ChatScreenState extends State<ChatScreen> {
       ),
       senderName: _auth.myName,
     );
+    final myKey = _auth.isRay ? 'ray' : 'aproo';
+    await _firestore.updatePresence(myKey);
   }
 
 
@@ -374,31 +374,37 @@ class ChatScreenState extends State<ChatScreen> {
                 children: [
                   const Text('Raayyy & Aproo'),
                   const SizedBox(height: 2),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 6,
-                        height: 6,
-                        decoration: BoxDecoration(
-                          color: _partnerIsOnline ? Colors.green : AppTheme.textMuted.withValues(alpha: 0.5),
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(width: 5),
-                      Text(
-                        _partnerIsOnline
-                            ? 'Active now'
-                            : (_partnerLastSeen == null
-                                ? 'Offline'
-                                : 'Active ${timeago.format(_partnerLastSeen!, locale: 'en_short')}'),
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.normal,
-                          color: AppTheme.textMuted,
-                        ),
-                      ),
-                    ],
+                  Builder(
+                    builder: (context) {
+                      final partnerOnline = _partnerLastSeen != null &&
+                          DateTime.now().difference(_partnerLastSeen!).inMinutes < 1;
+                      return Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 6,
+                            height: 6,
+                            decoration: BoxDecoration(
+                              color: partnerOnline ? Colors.green : AppTheme.textMuted.withValues(alpha: 0.5),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 5),
+                          Text(
+                            partnerOnline
+                                ? 'Active now'
+                                : (_partnerLastSeen == null
+                                    ? 'Offline'
+                                    : 'Active ${timeago.format(_partnerLastSeen!, locale: 'en_short')}'),
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.normal,
+                              color: AppTheme.textMuted,
+                            ),
+                          ),
+                        ],
+                      );
+                    }
                   ),
                 ],
               ),

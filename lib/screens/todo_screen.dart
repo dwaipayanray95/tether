@@ -328,6 +328,8 @@ class _TodoScreenState extends State<TodoScreen> {
         priority: priority,
       ),
     );
+    final myKey = _auth.isRay ? 'ray' : 'aproo';
+    await _firestore.updatePresence(myKey);
   }
 
   void _openDetail(TodoItem todo) {
@@ -855,6 +857,8 @@ class _TodoDetailSheetState extends State<_TodoDetailSheet> {
       widget.todo.title,
     );
     HapticFeedback.lightImpact();
+    final myKey = widget.myName == 'Ray' ? 'ray' : 'aproo';
+    await widget.firestore.updatePresence(myKey);
     if (mounted) setState(() => _sending = false);
   }
 
