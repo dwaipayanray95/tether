@@ -88,39 +88,76 @@ class _SearchScreenState extends State<SearchScreen> {
         centerTitle: false,
         titleSpacing: 0,
         title: Padding(
-          padding: const EdgeInsets.only(right: 8),
-          child: TextField(
-            controller: _searchCtrl,
-            autofocus: true,
-            decoration: const InputDecoration(
-              hintText: 'Search chats & to-dos…',
-              border: InputBorder.none,
-              enabledBorder: InputBorder.none,
-              focusedBorder: InputBorder.none,
-              hintStyle: TextStyle(color: AppTheme.textMuted),
-              contentPadding: EdgeInsets.zero,
+          padding: const EdgeInsets.only(right: 16),
+          child: Container(
+            height: 40,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.04),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: AppTheme.primary.withValues(alpha: 0.15),
+                width: 1,
+                  ),
+                ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.search_rounded,
+                  color: AppTheme.textMuted,
+                  size: 18,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    controller: _searchCtrl,
+                    autofocus: true,
+                    decoration: const InputDecoration(
+                      hintText: 'Search chats & to-dos…',
+                      border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                      hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 14),
+                      contentPadding: EdgeInsets.symmetric(vertical: 10),
+                    ),
+                    style: const TextStyle(fontSize: 14, color: AppTheme.textDark),
+                    onChanged: (v) => setState(() => _query = v.trim()),
+                  ),
+                ),
+                if (_query.isNotEmpty)
+                  GestureDetector(
+                    onTap: () {
+                      _searchCtrl.clear();
+                      setState(() => _query = '');
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: const BoxDecoration(
+                        color: AppTheme.textMuted,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.close_rounded,
+                        color: Colors.white,
+                        size: 12,
+                      ),
+                    ),
+                  ),
+              ],
             ),
-            style: const TextStyle(fontSize: 16),
-            onChanged: (v) => setState(() => _query = v.trim()),
           ),
         ),
         actions: [
           if (_loadingMessages)
             const Padding(
-              padding: EdgeInsets.all(14),
-              child: SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2),
+              padding: EdgeInsets.only(right: 16),
+              child: Center(
+                child: SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
               ),
-            )
-          else if (_query.isNotEmpty)
-            IconButton(
-              icon: const Icon(Icons.close),
-              onPressed: () {
-                _searchCtrl.clear();
-                setState(() => _query = '');
-              },
             ),
         ],
       ),
