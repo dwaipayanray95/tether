@@ -320,6 +320,19 @@ class FirestoreService {
     }, SetOptions(merge: true));
   }
 
+  Future<void> updateBatteryPresence(String myKey, int batteryLevel, bool isCharging) async {
+    LogService.log('Updating battery presence for $myKey: $batteryLevel% (charging: $isCharging)');
+    await _db.doc('couples/ray-aproo/status/presence').set({
+      myKey: {
+        'battery': {
+          'level': batteryLevel,
+          'isCharging': isCharging,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }
+      }
+    }, SetOptions(merge: true));
+  }
+
   // ── Sticky Notes ─────────────────────────────────────────────────────────
 
   Stream<QuerySnapshot<Map<String, dynamic>>> stickyNotesStream(String coupleId) {

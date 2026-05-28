@@ -51,6 +51,8 @@ class _HomeScreenState extends State<HomeScreen>
   Timestamp? _aprooLastSeen;
   Map<String, dynamic>? _rayMusic;
   Map<String, dynamic>? _aprooMusic;
+  Map<String, dynamic>? _rayBattery;
+  Map<String, dynamic>? _aprooBattery;
 
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _partnerLocSub;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _presenceSub;
@@ -171,10 +173,12 @@ class _HomeScreenState extends State<HomeScreen>
           if (r != null) {
             _rayLastSeen = r['lastSeen'] as Timestamp?;
             _rayMusic = r['music'] != null ? Map<String, dynamic>.from(r['music'] as Map) : null;
+            _rayBattery = r['battery'] != null ? Map<String, dynamic>.from(r['battery'] as Map) : null;
           }
           if (a != null) {
             _aprooLastSeen = a['lastSeen'] as Timestamp?;
             _aprooMusic = a['music'] != null ? Map<String, dynamic>.from(a['music'] as Map) : null;
+            _aprooBattery = a['battery'] != null ? Map<String, dynamic>.from(a['battery'] as Map) : null;
           }
         });
       }
@@ -233,6 +237,51 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  Widget _buildBatteryIndicator(int level, bool isCharging) {
+    if (level < 0) return const SizedBox.shrink();
+    
+    IconData icon;
+    Color color;
+    
+    if (isCharging) {
+      icon = Icons.battery_charging_full_rounded;
+      color = Colors.green.shade600;
+    } else if (level <= 15) {
+      icon = Icons.battery_alert_rounded;
+      color = AppTheme.primary;
+    } else if (level <= 30) {
+      icon = Icons.battery_3_bar_rounded;
+      color = Colors.amber.shade700;
+    } else {
+      icon = Icons.battery_full_rounded;
+      color = Colors.green.shade600;
+    }
+    
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withAlpha(25),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withAlpha(50), width: 0.8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: color),
+          const SizedBox(width: 3),
+          Text(
+            '$level%',
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildHeader() {
     final hour = DateTime.now().hour;
     final greeting = hour < 12
@@ -245,6 +294,8 @@ class _HomeScreenState extends State<HomeScreen>
     final partnerLastSeen = _auth.isRay ? _aprooLastSeen : _rayLastSeen;
     final partnerOnline = partnerLastSeen != null &&
         DateTime.now().difference(partnerLastSeen.toDate()).inMinutes < 1;
+
+    final partnerBattery = _auth.isRay ? _aprooBattery : _rayBattery;
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -287,6 +338,15 @@ class _HomeScreenState extends State<HomeScreen>
                     color: AppTheme.textMuted,
                   ),
                 ),
+                if (partnerBattery != null && (partnerBattery['level'] as int? ?? -1) >= 0) ...[
+                  const SizedBox(width: 6),
+                  const Text('·', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+                  const SizedBox(width: 6),
+                  _buildBatteryIndicator(
+                    partnerBattery['level'] as int? ?? -1,
+                    partnerBattery['isCharging'] as bool? ?? false,
+                  ),
+                ],
               ],
             ),
           ],

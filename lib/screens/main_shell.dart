@@ -34,6 +34,9 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   /// Tracks the last time we pinged GitHub for an update.
   DateTime? _lastUpdateCheck;
 
+  static const _batteryChannel = MethodChannel('com.theawesomeray.tether/battery');
+  Timer? _batteryTimer;
+
   void _goToTab(int index) {
     LogService.log('Navigating to tab: $index');
     setState(() => _currentIndex = index);
@@ -44,6 +47,8 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _firestore.updatePresence(_myPresenceKey);
+    _updateBatteryStatus();
+    _batteryTimer = Timer.periodic(const Duration(minutes: 5), (_) => _updateBatteryStatus());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // Handle notification-triggered navigation on cold start
       _handlePendingNotification();
@@ -52,6 +57,21 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       // Proactively check and request all permissions
       _requestAllPermissions();
     });
+  }
+
+  Future<void> _updateBatteryStatus() async {
+    try {
+      final Map<dynamic, dynamic>? info = await _batteryChannel.invokeMethod('getBatteryInfo');
+      if (info != null) {
+        final level = info['batteryLevel'] as int? ?? -1;
+        final isCharging = info['isCharging'] as bool? ?? false;
+        if (level >= 0) {
+          await _firestore.updateBatteryPresence(_myPresenceKey, level, isCharging);
+        }
+      }
+    } catch (e) {
+      LogService.log('Error getting battery level: $e');
+    }
   }
 
   Future<void> _requestAllPermissions() async {
@@ -234,6 +254,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _batteryTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -244,6 +265,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     switch (state) {
       case AppLifecycleState.resumed:
         _firestore.updatePresence(_myPresenceKey);
+        _updateBatteryStatus();
         _checkForUpdate();
         WidgetsBinding.instance.addPostFrameCallback((_) {
           _handlePendingNotification();
