@@ -1304,11 +1304,127 @@ class _StickyNoteTile extends StatelessWidget {
     required this.onDelete,
   });
 
+  void _showReadNoteDialog(BuildContext context, Color paperColor) {
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        child: Stack(
+          clipBehavior: Clip.none,
+          alignment: Alignment.center,
+          children: [
+            Container(
+              width: 300,
+              padding: const EdgeInsets.fromLTRB(20, 32, 20, 24),
+              decoration: BoxDecoration(
+                color: paperColor,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.15),
+                    blurRadius: 20,
+                    offset: const Offset(4, 10),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 300),
+                    child: SingleChildScrollView(
+                      child: Text(
+                        text,
+                        style: GoogleFonts.caveat(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: const Color(0xFF3E2D29),
+                          height: 1.3,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        '— $author',
+                        style: GoogleFonts.dmSans(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: const Color(0xFF8C7A76),
+                        ),
+                      ),
+                      if (date != null)
+                        Text(
+                          DateFormat('d MMMM y, h:mm a').format(date!),
+                          style: GoogleFonts.dmSans(
+                            fontSize: 10,
+                            color: const Color(0xFF8C7A76),
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            Positioned(
+              top: -8,
+              child: Container(
+                width: 70,
+                height: 20,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.6),
+                  borderRadius: BorderRadius.circular(2),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.03),
+                      blurRadius: 2,
+                    )
+                  ]
+                ),
+              ),
+            ),
+            Positioned(
+              top: -12,
+              right: -12,
+              child: GestureDetector(
+                onTap: () => Navigator.pop(ctx),
+                child: Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black12,
+                        blurRadius: 4,
+                        offset: Offset(0, 2),
+                      )
+                    ]
+                  ),
+                  child: const Icon(Icons.close_rounded, size: 16, color: AppTheme.textMuted),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final color = _pastels[colorIndex % _pastels.length];
 
     return GestureDetector(
+      onTap: () {
+        HapticFeedback.lightImpact();
+        _showReadNoteDialog(context, color);
+      },
       onLongPress: () {
         HapticFeedback.heavyImpact();
         onDelete();
