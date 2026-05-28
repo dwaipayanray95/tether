@@ -6,14 +6,66 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
 import android.os.BatteryManager
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.EventChannel
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.theawesomeray.tether/music"
     private var musicChannel: MethodChannel? = null
     private var musicReceiver: BroadcastReceiver? = null
+
+    private val COMPASS_CHANNEL = "com.theawesomeray.tether/compass"
+    private var sensorManager: SensorManager? = null
+    private var rotationSensor: Sensor? = null
+    private var magneticSensor: Sensor? = null
+    private var accelerometerSensor: Sensor? = null
+    
+    private val rMat = FloatArray(9)
+    private val orientation = FloatArray(3)
+    private var lastAccelerometer = FloatArray(3)
+    private var lastMagnetometer = FloatArray(3)
+    private var lastAccelerometerSet = false
+    private var lastMagnetometerSet = false
+    
+    private var compassEventSink: EventChannel.EventSink? = null
+    
+    private val compassListener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent?) {
+            if (event == null) return
+            var azimuth = 0f
+            
+            if (event.sensor.type == Sensor.TYPE_ROTATION_VECTOR) {
+                SensorManager.getRotationMatrixFromVector(rMat, event.values)
+                azimuth = Math.toDegrees(SensorManager.getOrientation(rMat, orientation)[0].toDouble()).toFloat()
+            } else {
+                if (event.sensor.type == Sensor.TYPE_ACCELEROMETER) {
+                    System.arraycopy(event.values, 0, lastAccelerometer, 0, event.values.size)
+                    lastAccelerometerSet = true
+                } else if (event.sensor.type == Sensor.TYPE_MAGNETIC_FIELD) {
+                    System.arraycopy(event.values, 0, lastMagnetometer, 0, event.values.size)
+                    lastMagnetometerSet = true
+                }
+                if (lastAccelerometerSet && lastMagnetometerSet) {
+                    SensorManager.getRotationMatrix(rMat, null, lastAccelerometer, lastMagnetometer)
+                    azimuth = Math.toDegrees(SensorManager.getOrientation(rMat, orientation)[0].toDouble()).toFloat()
+                }
+            }
+            
+            azimuth = (azimuth + 360) % 360
+            
+            runOnUiThread {
+                compassEventSink?.success(azimuth.toDouble())
+            }
+        }
+
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -40,6 +92,40 @@ class MainActivity : FlutterActivity() {
                 result.notImplemented()
             }
         }
+
+        sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        rotationSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
+        if (rotationSensor == null) {
+            magneticSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)
+            accelerometerSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        }
+        
+        EventChannel(flutterEngine.dartExecutor.binaryMessenger, COMPASS_CHANNEL).setStreamHandler(
+            object : EventChannel.StreamHandler {
+                override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                    compassEventSink = events
+                    registerCompass()
+                }
+
+                override fun onCancel(arguments: Any?) {
+                    unregisterCompass()
+                    compassEventSink = null
+                }
+            }
+        )
+    }
+
+    private fun registerCompass() {
+        rotationSensor?.let {
+            sensorManager?.registerListener(compassListener, it, SensorManager.SENSOR_DELAY_UI)
+        } ?: run {
+            sensorManager?.registerListener(compassListener, magneticSensor, SensorManager.SENSOR_DELAY_UI)
+            sensorManager?.registerListener(compassListener, accelerometerSensor, SensorManager.SENSOR_DELAY_UI)
+        }
+    }
+    
+    private fun unregisterCompass() {
+        sensorManager?.unregisterListener(compassListener)
     }
 
     override fun onDestroy() {
