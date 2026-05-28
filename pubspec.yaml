@@ -1,7 +1,7 @@
 name: tether
 description: "Tether - Raayyy & Aproo"
 publish_to: 'none'
-version: 1.5.0+29
+version: 1.5.1+30
 
 environment:
   sdk: ^3.11.5

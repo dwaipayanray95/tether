@@ -633,6 +633,34 @@ class _TodoTile extends StatelessWidget {
     );
   }
 
+  Widget _buildChecklistProgress(List<ChecklistItem> checklist) {
+    if (checklist.isEmpty) return const SizedBox.shrink();
+    final doneCount = checklist.where((item) => item.isDone).length;
+    final total = checklist.length;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: AppTheme.primaryLight,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.check_box_outlined, size: 10, color: AppTheme.primary),
+          const SizedBox(width: 4),
+          Text(
+            '$doneCount/$total',
+            style: const TextStyle(
+              color: AppTheme.primary,
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _confirmDeleteTodo(BuildContext context) {
     showDialog(
       context: context,
@@ -701,15 +729,17 @@ class _TodoTile extends StatelessWidget {
           _confirmDeleteTodo(context);
         },
         child: Container(
-          margin: isStacked ? EdgeInsets.zero : const EdgeInsets.only(bottom: 8),
+          margin: isStacked ? EdgeInsets.zero : const EdgeInsets.only(bottom: 6),
           decoration: BoxDecoration(
             color: isStacked ? Colors.transparent : AppTheme.surface,
             borderRadius: isStacked ? BorderRadius.zero : BorderRadius.circular(14),
             border: isStacked ? null : Border.all(color: AppTheme.divider),
           ),
           child: ListTile(
+            dense: true,
+            visualDensity: const VisualDensity(horizontal: 0, vertical: -2),
             contentPadding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
             leading: GestureDetector(
               onTap: () {
                 if (todo.isDone) {
@@ -748,9 +778,10 @@ class _TodoTile extends StatelessWidget {
             subtitle: (todo.details != null && todo.details!.isNotEmpty) ||
                     todo.dueDate != null ||
                     todo.priority != null ||
-                    todo.assignedTo != null
+                    todo.assignedTo != null ||
+                    todo.checklist.isNotEmpty
                 ? Padding(
-                    padding: const EdgeInsets.only(top: 6),
+                    padding: const EdgeInsets.only(top: 4),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -762,7 +793,7 @@ class _TodoTile extends StatelessWidget {
                             style: const TextStyle(
                                 fontSize: 12, color: AppTheme.textMuted),
                           ),
-                          const SizedBox(height: 6),
+                          const SizedBox(height: 4),
                         ],
                         Wrap(
                           spacing: 6,
@@ -774,6 +805,8 @@ class _TodoTile extends StatelessWidget {
                               _buildDueDateIndicator(todo.dueDate!, todo.isDone),
                             if (todo.assignedTo != null)
                               _buildAssigneeIndicator(todo.assignedTo!),
+                            if (todo.checklist.isNotEmpty)
+                              _buildChecklistProgress(todo.checklist),
                           ],
                         ),
                       ],
@@ -831,6 +864,7 @@ class _TodoDetailSheet extends StatefulWidget {
 class _TodoDetailSheetState extends State<_TodoDetailSheet> {
   final _commentCtrl = TextEditingController();
   final _detailsCtrl = TextEditingController();
+  final _subtaskCtrl = TextEditingController();
   bool _sending = false;
   bool _editingDetails = false;
 
@@ -838,6 +872,14 @@ class _TodoDetailSheetState extends State<_TodoDetailSheet> {
   void initState() {
     super.initState();
     _detailsCtrl.text = widget.todo.details ?? '';
+  }
+
+  @override
+  void dispose() {
+    _commentCtrl.dispose();
+    _detailsCtrl.dispose();
+    _subtaskCtrl.dispose();
+    super.dispose();
   }
 
   Future<void> _sendComment() async {
@@ -860,13 +902,6 @@ class _TodoDetailSheetState extends State<_TodoDetailSheet> {
     final myKey = widget.myName == 'Ray' ? 'ray' : 'aproo';
     await widget.firestore.updatePresence(myKey);
     if (mounted) setState(() => _sending = false);
-  }
-
-  Future<void> _saveDetails() async {
-    final details = _detailsCtrl.text.trim();
-    await widget.firestore.updateTodoDetails(
-        widget.coupleId, widget.todo.id, details);
-    if (mounted) setState(() => _editingDetails = false);
   }
 
   void _confirmDeleteComment(String commentId, String authorName) {
@@ -894,305 +929,472 @@ class _TodoDetailSheetState extends State<_TodoDetailSheet> {
     );
   }
 
+  Widget _buildChecklistSection(TodoItem todo) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 4),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Sub-tasks',
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(color: AppTheme.textMuted, letterSpacing: 0.3),
+              ),
+              if (todo.checklist.isNotEmpty)
+                Text(
+                  '${todo.checklist.where((i) => i.isDone).length}/${todo.checklist.length}',
+                  style: const TextStyle(
+                    color: AppTheme.primary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+            ],
+          ),
+        ),
+        if (todo.checklist.isNotEmpty)
+          ListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            itemCount: todo.checklist.length,
+            itemBuilder: (context, index) {
+              final item = todo.checklist[index];
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: [
+                    GestureDetector(
+                      onTap: () {
+                        HapticFeedback.lightImpact();
+                        final updated = todo.checklist.map((c) {
+                          if (c.id == item.id) {
+                            return c.copyWith(isDone: !c.isDone);
+                          }
+                          return c;
+                        }).toList();
+                        widget.firestore.updateTodoChecklist(
+                          widget.coupleId,
+                          todo.id,
+                          updated,
+                        );
+                      },
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        width: 20,
+                        height: 20,
+                        decoration: BoxDecoration(
+                          color: item.isDone ? AppTheme.primary : Colors.transparent,
+                          border: Border.all(
+                            color: item.isDone ? AppTheme.primary : AppTheme.textMuted,
+                            width: 1.5,
+                          ),
+                          borderRadius: BorderRadius.circular(5),
+                        ),
+                        child: item.isDone
+                            ? const Icon(Icons.check, color: Colors.white, size: 12)
+                            : null,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        item.title,
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: item.isDone ? AppTheme.textMuted : AppTheme.textDark,
+                          decoration: item.isDone ? TextDecoration.lineThrough : null,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded, size: 16, color: AppTheme.textMuted),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      onPressed: () {
+                        HapticFeedback.mediumImpact();
+                        final updated = todo.checklist.where((c) => c.id != item.id).toList();
+                        widget.firestore.updateTodoChecklist(
+                          widget.coupleId,
+                          todo.id,
+                          updated,
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _subtaskCtrl,
+                  decoration: const InputDecoration(
+                    hintText: 'Add sub-task...',
+                    contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  ),
+                  style: const TextStyle(fontSize: 13),
+                  textCapitalization: TextCapitalization.sentences,
+                  onSubmitted: (_) => _addSubtask(todo),
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                icon: const Icon(Icons.add_circle_outline_rounded, color: AppTheme.primary, size: 22),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                onPressed: () => _addSubtask(todo),
+              ),
+            ],
+          ),
+        ),
+        const Divider(color: AppTheme.divider, height: 1),
+      ],
+    );
+  }
+
+  void _addSubtask(TodoItem todo) {
+    final title = _subtaskCtrl.text.trim();
+    if (title.isEmpty) return;
+    HapticFeedback.lightImpact();
+    final newItem = ChecklistItem(
+      id: const Uuid().v4(),
+      title: title,
+      isDone: false,
+    );
+    final updated = [...todo.checklist, newItem];
+    widget.firestore.updateTodoChecklist(widget.coupleId, todo.id, updated);
+    _subtaskCtrl.clear();
+  }
+
   @override
   Widget build(BuildContext context) {
     return DraggableScrollableSheet(
       expand: false,
-      initialChildSize: 0.65,
+      initialChildSize: 0.75,
       maxChildSize: 0.92,
-      builder: (context, scrollCtrl) => Column(
-        children: [
-          // Handle
-          Padding(
-            padding: const EdgeInsets.only(top: 12, bottom: 8),
-            child: Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: AppTheme.divider,
-                borderRadius: BorderRadius.circular(2),
+      builder: (context, scrollCtrl) => StreamBuilder<TodoItem>(
+        stream: widget.firestore.todoDocStream(widget.coupleId, widget.todo.id),
+        initialData: widget.todo,
+        builder: (context, snapshot) {
+          final currentTodo = snapshot.data ?? widget.todo;
+          return Column(
+            children: [
+              // Handle
+              Padding(
+                padding: const EdgeInsets.only(top: 12, bottom: 8),
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppTheme.divider,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
               ),
-            ),
-          ),
 
-          // Title + checkbox
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                GestureDetector(
-                  onTap: () =>
-                      widget.firestore.toggleTodo(widget.coupleId, widget.todo),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    margin: const EdgeInsets.only(top: 3),
-                    width: 24,
-                    height: 24,
-                    decoration: BoxDecoration(
-                      color: widget.todo.isDone
-                          ? AppTheme.primary
-                          : Colors.transparent,
-                      border: Border.all(
-                        color: widget.todo.isDone
-                            ? AppTheme.primary
-                            : AppTheme.textMuted,
-                        width: 1.5,
-                      ),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: widget.todo.isDone
-                        ? const Icon(Icons.check, color: Colors.white, size: 15)
-                        : null,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    widget.todo.title,
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.textDark,
-                      decoration: widget.todo.isDone
-                          ? TextDecoration.lineThrough
-                          : null,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // Details section
-          Padding(
-            padding: const EdgeInsets.fromLTRB(56, 10, 20, 12),
-            child: _editingDetails
-                ? Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _detailsCtrl,
-                          autofocus: true,
-                          maxLines: 4,
-                          minLines: 1,
-                          decoration: const InputDecoration(
-                            hintText: 'Add details...',
+              // Title + checkbox
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    GestureDetector(
+                      onTap: () =>
+                          widget.firestore.toggleTodo(widget.coupleId, currentTodo),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        margin: const EdgeInsets.only(top: 3),
+                        width: 24,
+                        height: 24,
+                        decoration: BoxDecoration(
+                          color: currentTodo.isDone
+                              ? AppTheme.primary
+                              : Colors.transparent,
+                          border: Border.all(
+                            color: currentTodo.isDone
+                                ? AppTheme.primary
+                                : AppTheme.textMuted,
+                            width: 1.5,
                           ),
-                          textCapitalization: TextCapitalization.sentences,
+                          borderRadius: BorderRadius.circular(6),
                         ),
+                        child: currentTodo.isDone
+                            ? const Icon(Icons.check, color: Colors.white, size: 15)
+                            : null,
                       ),
-                      const SizedBox(width: 8),
-                      TextButton(
-                          onPressed: _saveDetails,
-                          child: const Text('Save',
-                              style: TextStyle(color: AppTheme.primary))),
-                    ],
-                  )
-                : GestureDetector(
-                    onTap: () => setState(() => _editingDetails = true),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.notes_rounded,
-                            size: 16, color: AppTheme.textMuted),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            widget.todo.details?.isNotEmpty == true
-                                ? widget.todo.details!
-                                : 'Add details...',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: widget.todo.details?.isNotEmpty == true
-                                  ? AppTheme.textDark
-                                  : AppTheme.textMuted,
-                            ),
-                          ),
-                        ),
-                        const Icon(Icons.edit_outlined,
-                            size: 14, color: AppTheme.textMuted),
-                      ],
                     ),
-                  ),
-          ),
-
-          const Divider(color: AppTheme.divider, height: 1),
-
-          // Notes header
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
-            child: Text('Notes',
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall
-                    ?.copyWith(color: AppTheme.textMuted, letterSpacing: 0.3)),
-          ),
-
-          // Comments list
-          Expanded(
-            child: StreamBuilder<List<TodoComment>>(
-              stream: widget.firestore
-                  .commentStream(widget.coupleId, widget.todo.id),
-              builder: (context, snap) {
-                if (!snap.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                final comments = snap.data!;
-                if (comments.isEmpty) {
-                  return Center(
-                    child: Text('No notes yet — add one below',
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        currentTodo.title,
                         style: TextStyle(
-                            color: AppTheme.textMuted, fontSize: 13)),
-                  );
-                }
-                return ListView.builder(
-                  controller: scrollCtrl,
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-                  itemCount: comments.length,
-                  itemBuilder: (ctx, i) {
-                    final c = comments[i];
-                    final isMe = c.authorName == widget.myName;
-                    return GestureDetector(
-                      onLongPress: () => _confirmDeleteComment(c.id, c.authorName),
-                      child: Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
+                          fontSize: 20,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.textDark,
+                          decoration: currentTodo.isDone
+                              ? TextDecoration.lineThrough
+                              : null,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // Details section
+              Padding(
+                padding: const EdgeInsets.fromLTRB(56, 10, 20, 12),
+                child: _editingDetails
+                    ? Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _detailsCtrl,
+                              autofocus: true,
+                              maxLines: 4,
+                              minLines: 1,
+                              decoration: const InputDecoration(
+                                hintText: 'Add details...',
+                              ),
+                              textCapitalization: TextCapitalization.sentences,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          TextButton(
+                              onPressed: () async {
+                                final details = _detailsCtrl.text.trim();
+                                await widget.firestore.updateTodoDetails(
+                                    widget.coupleId, currentTodo.id, details);
+                                if (mounted) setState(() => _editingDetails = false);
+                              },
+                              child: const Text('Save',
+                                  style: TextStyle(color: AppTheme.primary))),
+                        ],
+                      )
+                    : GestureDetector(
+                        onTap: () => setState(() => _editingDetails = true),
                         child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          mainAxisAlignment: isMe
-                              ? MainAxisAlignment.end
-                              : MainAxisAlignment.start,
                           children: [
-                            if (!isMe) ...[
-                              CircleAvatar(
-                                radius: 14,
-                                backgroundColor: AppTheme.primaryLight,
-                                child: Text(c.authorName[0],
-                                    style: const TextStyle(
-                                        fontSize: 12,
-                                        color: AppTheme.primary,
-                                        fontWeight: FontWeight.w600)),
-                              ),
-                              const SizedBox(width: 8),
-                            ],
-                            if (isMe) ...[
-                              GestureDetector(
-                                onTap: () => _confirmDeleteComment(c.id, c.authorName),
-                                child: const Padding(
-                                  padding: EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-                                  child: Icon(Icons.more_vert,
-                                      size: 16, color: AppTheme.textMuted),
-                                ),
-                              ),
-                              const SizedBox(width: 4),
-                            ],
-                            Flexible(
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 14, vertical: 10),
-                                decoration: BoxDecoration(
-                                  color: isMe
-                                      ? AppTheme.primary
-                                      : AppTheme.surface,
-                                  borderRadius: BorderRadius.only(
-                                    topLeft: const Radius.circular(16),
-                                    topRight: const Radius.circular(16),
-                                    bottomLeft:
-                                        Radius.circular(isMe ? 16 : 4),
-                                    bottomRight:
-                                        Radius.circular(isMe ? 4 : 16),
-                                  ),
-                                  border: isMe
-                                      ? null
-                                      : Border.all(color: AppTheme.divider),
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: isMe
-                                      ? CrossAxisAlignment.end
-                                      : CrossAxisAlignment.start,
-                                  children: [
-                                    Text(c.text,
-                                        style: TextStyle(
-                                            fontSize: 14,
-                                            color: isMe
-                                                ? Colors.white
-                                                : AppTheme.textDark)),
-                                    const SizedBox(height: 3),
-                                    Text(
-                                      timeago.format(c.createdAt,
-                                          locale: 'en_short'),
-                                      style: TextStyle(
-                                          fontSize: 10,
-                                          color: isMe
-                                              ? Colors.white54
-                                              : AppTheme.textMuted),
-                                    ),
-                                  ],
+                            const Icon(Icons.notes_rounded,
+                                size: 16, color: AppTheme.textMuted),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                currentTodo.details?.isNotEmpty == true
+                                    ? currentTodo.details!
+                                    : 'Add details...',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: currentTodo.details?.isNotEmpty == true
+                                      ? AppTheme.textDark
+                                      : AppTheme.textMuted,
                                 ),
                               ),
                             ),
-                            if (!isMe) ...[
-                              const SizedBox(width: 4),
-                              GestureDetector(
-                                onTap: () => _confirmDeleteComment(c.id, c.authorName),
-                                child: const Padding(
-                                  padding: EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-                                  child: Icon(Icons.more_vert,
-                                      size: 16, color: AppTheme.textMuted),
-                                ),
-                              ),
-                            ],
+                            const Icon(Icons.edit_outlined,
+                                size: 14, color: AppTheme.textMuted),
                           ],
                         ),
                       ),
+              ),
+
+              const Divider(color: AppTheme.divider, height: 1),
+
+              // Checklist Section
+              _buildChecklistSection(currentTodo),
+
+              // Notes header
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
+                child: Text('Notes',
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(color: AppTheme.textMuted, letterSpacing: 0.3)),
+              ),
+
+              // Comments list
+              Expanded(
+                child: StreamBuilder<List<TodoComment>>(
+                  stream: widget.firestore
+                      .commentStream(widget.coupleId, currentTodo.id),
+                  builder: (context, snap) {
+                    if (!snap.hasData) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    final comments = snap.data!;
+                    if (comments.isEmpty) {
+                      return Center(
+                        child: Text('No notes yet — add one below',
+                            style: TextStyle(
+                                color: AppTheme.textMuted, fontSize: 13)),
+                      );
+                    }
+                    return ListView.builder(
+                      controller: scrollCtrl,
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                      itemCount: comments.length,
+                      itemBuilder: (ctx, i) {
+                        final c = comments[i];
+                        final isMe = c.authorName == widget.myName;
+                        return GestureDetector(
+                          onLongPress: () => _confirmDeleteComment(c.id, c.authorName),
+                          child: Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              mainAxisAlignment: isMe
+                                  ? MainAxisAlignment.end
+                                  : MainAxisAlignment.start,
+                              children: [
+                                if (!isMe) ...[
+                                  CircleAvatar(
+                                    radius: 14,
+                                    backgroundColor: AppTheme.primaryLight,
+                                    child: Text(c.authorName[0],
+                                        style: const TextStyle(
+                                            fontSize: 12,
+                                            color: AppTheme.primary,
+                                            fontWeight: FontWeight.w600)),
+                                  ),
+                                  const SizedBox(width: 8),
+                                ],
+                                if (isMe) ...[
+                                  GestureDetector(
+                                    onTap: () => _confirmDeleteComment(c.id, c.authorName),
+                                    child: const Padding(
+                                      padding: EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                                      child: Icon(Icons.more_vert,
+                                          size: 16, color: AppTheme.textMuted),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 4),
+                                ],
+                                Flexible(
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 14, vertical: 10),
+                                    decoration: BoxDecoration(
+                                      color: isMe
+                                          ? AppTheme.primary
+                                          : AppTheme.surface,
+                                      borderRadius: isMe
+                                          ? const BorderRadius.only(
+                                              topLeft: Radius.circular(16),
+                                              topRight: Radius.circular(16),
+                                              bottomLeft: Radius.circular(16),
+                                              bottomRight: Radius.circular(4),
+                                            )
+                                          : const BorderRadius.only(
+                                              topLeft: Radius.circular(16),
+                                              topRight: Radius.circular(16),
+                                              bottomLeft: Radius.circular(4),
+                                              bottomRight: Radius.circular(16),
+                                            ),
+                                      border: isMe
+                                          ? null
+                                          : Border.all(color: AppTheme.divider),
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment: isMe
+                                          ? CrossAxisAlignment.end
+                                          : CrossAxisAlignment.start,
+                                      children: [
+                                        Text(c.text,
+                                            style: TextStyle(
+                                                fontSize: 14,
+                                                color: isMe
+                                                    ? Colors.white
+                                                    : AppTheme.textDark)),
+                                        const SizedBox(height: 3),
+                                        Text(
+                                          timeago.format(c.createdAt,
+                                              locale: 'en_short'),
+                                          style: TextStyle(
+                                              fontSize: 10,
+                                              color: isMe
+                                                  ? Colors.white54
+                                                  : AppTheme.textMuted),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                                if (!isMe) ...[
+                                  const SizedBox(width: 4),
+                                  GestureDetector(
+                                    onTap: () => _confirmDeleteComment(c.id, c.authorName),
+                                    child: const Padding(
+                                      padding: EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                                      child: Icon(Icons.more_vert,
+                                          size: 16, color: AppTheme.textMuted),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        );
+                      },
                     );
                   },
-                );
-              },
-            ),
-          ),
-
-          // Comment input
-          Container(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-            decoration: const BoxDecoration(
-              color: AppTheme.surface,
-              border: Border(top: BorderSide(color: AppTheme.divider)),
-            ),
-            child: SafeArea(
-              top: false,
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _commentCtrl,
-                      decoration: const InputDecoration(
-                        hintText: 'Add a note...',
-                        contentPadding:
-                            EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                      ),
-                      textCapitalization: TextCapitalization.sentences,
-                      onSubmitted: (_) => _sendComment(),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  GestureDetector(
-                    onTap: _sending ? null : _sendComment,
-                    child: Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: const BoxDecoration(
-                        color: AppTheme.primary,
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(Icons.send_rounded,
-                          color: Colors.white, size: 18),
-                    ),
-                  ),
-                ],
+                ),
               ),
-            ),
-          ),
-        ],
+
+              // Comment input
+              Container(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                decoration: const BoxDecoration(
+                  color: AppTheme.surface,
+                  border: Border(top: BorderSide(color: AppTheme.divider)),
+                ),
+                child: SafeArea(
+                  top: false,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _commentCtrl,
+                          decoration: const InputDecoration(
+                            hintText: 'Add a note...',
+                            contentPadding:
+                                EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                          ),
+                          textCapitalization: TextCapitalization.sentences,
+                          onSubmitted: (_) => _sendComment(),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      GestureDetector(
+                        onTap: _sending ? null : _sendComment,
+                        child: Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: const BoxDecoration(
+                            color: AppTheme.primary,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.send_rounded,
+                              color: Colors.white, size: 18),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
