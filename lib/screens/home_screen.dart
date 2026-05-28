@@ -863,116 +863,95 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ── Sticky Notes Board & Sheets ────────────────────────────────────────────
-
-  Widget _buildStickyNotesBoard() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  Widget _buildAddNoteTile(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        HapticFeedback.mediumImpact();
+        _showAddNoteSheet();
+      },
+      child: Container(
+        width: 145,
+        margin: const EdgeInsets.only(right: 14),
+        decoration: BoxDecoration(
+          color: AppTheme.primaryLight.withValues(alpha: 0.35),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: AppTheme.primary.withValues(alpha: 0.25),
+            width: 1.5,
+          ),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(6),
-                  decoration: BoxDecoration(
-                    color: AppTheme.primaryLight,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Icon(Icons.push_pin_rounded,
-                      color: AppTheme.primary, size: 16),
-                ),
-                const SizedBox(width: 10),
-                Text(
-                  'Sticky Notes',
-                  style: GoogleFonts.dmSans(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: AppTheme.textDark,
-                  ),
-                ),
-              ],
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppTheme.primary.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.add_rounded,
+                color: AppTheme.primary,
+                size: 24,
+              ),
             ),
-            IconButton(
-              icon: const Icon(Icons.add_circle_outline_rounded,
-                  color: AppTheme.primary, size: 20),
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(),
-              onPressed: _showAddNoteSheet,
+            const SizedBox(height: 10),
+            Text(
+              'Add Sticky',
+              style: GoogleFonts.dmSans(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.primary,
+              ),
             ),
           ],
         ),
-        const SizedBox(height: 10),
-        StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-          stream: _firestore.stickyNotesStream(coupleId),
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const SizedBox(
-                height: 120,
-                child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-              );
-            }
-            final docs = snapshot.data?.docs ?? [];
-            if (docs.isEmpty) {
-              return Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 16),
-                decoration: BoxDecoration(
-                  color: AppTheme.surface,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: AppTheme.divider),
-                ),
-                child: Column(
-                  children: [
-                    const Icon(Icons.post_add_rounded,
-                        size: 36, color: AppTheme.textMuted),
-                    const SizedBox(height: 8),
-                    Text(
-                      'No sticky notes yet.',
-                      style: GoogleFonts.dmSans(
-                          fontSize: 13, color: AppTheme.textMuted),
-                    ),
-                    Text(
-                      'Tap "+" to pin your first love note!',
-                      style: GoogleFonts.dmSans(
-                          fontSize: 12, color: AppTheme.textMuted),
-                    ),
-                  ],
-                ),
-              );
-            }
+      ),
+    );
+  }
 
-            return SizedBox(
-              height: 155,
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                itemCount: docs.length,
-                itemBuilder: (context, index) {
-                  final doc = docs[index];
-                  final id = doc.id;
-                  final text = doc['text'] as String? ?? '';
-                  final colorIdx = doc['colorIndex'] as int? ?? 0;
-                  final author = doc['createdByName'] as String? ?? 'Partner';
-                  final authorUid = doc['createdBy'] as String? ?? '';
-                  final date = (doc['createdAt'] as Timestamp?)?.toDate();
+  Widget _buildStickyNotesBoard() {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: _firestore.stickyNotesStream(coupleId),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const SizedBox(
+            height: 155,
+            child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+          );
+        }
+        final docs = snapshot.data?.docs ?? [];
+        return SizedBox(
+          height: 155,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            itemCount: docs.length + 1,
+            itemBuilder: (context, index) {
+              if (index == 0) {
+                return _buildAddNoteTile(context);
+              }
+              final doc = docs[index - 1];
+              final id = doc.id;
+              final text = doc['text'] as String? ?? '';
+              final colorIdx = doc['colorIndex'] as int? ?? 0;
+              final author = doc['createdByName'] as String? ?? 'Partner';
+              final authorUid = doc['createdBy'] as String? ?? '';
+              final date = (doc['createdAt'] as Timestamp?)?.toDate();
 
-                  return _StickyNoteTile(
-                    id: id,
-                    text: text,
-                    colorIndex: colorIdx,
-                    author: author,
-                    isMe: authorUid == _auth.currentUser!.uid,
-                    date: date,
-                    onDelete: () => _confirmDeleteNote(id),
-                  );
-                },
-              ),
-            );
-          },
-        ),
-      ],
+              return _StickyNoteTile(
+                id: id,
+                text: text,
+                colorIndex: colorIdx,
+                author: author,
+                isMe: authorUid == _auth.currentUser!.uid,
+                date: date,
+                onDelete: () => _confirmDeleteNote(id),
+              );
+            },
+          ),
+        );
+      },
     );
   }
 
