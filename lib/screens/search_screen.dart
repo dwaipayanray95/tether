@@ -124,23 +124,6 @@ class _SearchScreenState extends State<SearchScreen> {
                     onChanged: (v) => setState(() => _query = v.trim()),
                   ),
                 ),
-                GestureDetector(
-                  onTap: () {
-                    Navigator.pop(context);
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.05),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.close_rounded,
-                      color: AppTheme.textMuted,
-                      size: 14,
-                    ),
-                  ),
-                ),
               ],
             ),
           ),
