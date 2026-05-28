@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -47,6 +48,15 @@ class _HomeScreenState extends State<HomeScreen>
   bool _locationLoading = true;
   bool _isRefreshing = false;
 
+  // Proximity Sync via RTDB (AirTag mode)
+  final _rtdb = FirebaseDatabase.instance;
+  StreamSubscription? _rtdbProximitySub;
+  StreamSubscription<Position>? _myPositionSub;
+  Timer? _rtdbProximityTimer;
+  bool _proximityActive = false;
+  double? _radarPartnerLat;
+  double? _radarPartnerLng;
+
   // Compass Sensor Stream
   static const _compassChannel = EventChannel('com.theawesomeray.tether/compass');
   StreamSubscription? _compassSub;
@@ -66,13 +76,21 @@ class _HomeScreenState extends State<HomeScreen>
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _presenceSub;
 
   double? get _distanceKm {
-    final p = _partnerLocation;
     final my = _myPosition;
-    if (p == null || my == null) return null;
-    final lat = p['lat'] as double?;
-    final lng = p['lng'] as double?;
-    if (lat == null || lng == null) return null;
-    return Geolocator.distanceBetween(my.latitude, my.longitude, lat, lng) /
+    if (my == null) return null;
+    
+    double? plat;
+    double? plng;
+    if (_proximityActive && _radarPartnerLat != null && _radarPartnerLng != null) {
+      plat = _radarPartnerLat;
+      plng = _radarPartnerLng;
+    } else if (_partnerLocation != null) {
+      plat = _partnerLocation!['lat'] as double?;
+      plng = _partnerLocation!['lng'] as double?;
+    }
+    
+    if (plat == null || plng == null) return null;
+    return Geolocator.distanceBetween(my.latitude, my.longitude, plat, plng) /
         1000;
   }
 
@@ -108,6 +126,9 @@ class _HomeScreenState extends State<HomeScreen>
     _presenceSub?.cancel();
     _pokeSub?.cancel();
     _compassSub?.cancel();
+    _rtdbProximitySub?.cancel();
+    _myPositionSub?.cancel();
+    _rtdbProximityTimer?.cancel();
     super.dispose();
   }
 
@@ -142,9 +163,18 @@ class _HomeScreenState extends State<HomeScreen>
 
   double _getRotationTarget() {
     final dist = _distanceKm;
-    if (dist == null || _myPosition == null || _partnerLocation == null) return 0.0;
-    final plat = _partnerLocation!['lat'] as double?;
-    final plng = _partnerLocation!['lng'] as double?;
+    if (dist == null || _myPosition == null) return 0.0;
+    
+    double? plat;
+    double? plng;
+    if (_proximityActive && _radarPartnerLat != null && _radarPartnerLng != null) {
+      plat = _radarPartnerLat;
+      plng = _radarPartnerLng;
+    } else if (_partnerLocation != null) {
+      plat = _partnerLocation!['lat'] as double?;
+      plng = _partnerLocation!['lng'] as double?;
+    }
+    
     if (plat == null || plng == null) return 0.0;
     final b = _calculateBearing(
       _myPosition!.latitude,
@@ -165,6 +195,101 @@ class _HomeScreenState extends State<HomeScreen>
     }
     _turns += diff / 360.0;
     _lastTargetDegrees = targetDegrees;
+  }
+
+  void _startProximityRadar() {
+    if (_proximityActive) return;
+    debugPrint('Starting Proximity Radar (3Hz RTDB mode)...');
+    
+    final partnerKey = _auth.isRay ? 'aproo' : 'ray';
+    final myKey = _auth.isRay ? 'ray' : 'aproo';
+    
+    setState(() {
+      _proximityActive = true;
+    });
+
+    // 1. Subscribe to partner's RTDB coordinates stream
+    _rtdbProximitySub = _rtdb.ref('proximity_sync/ray-aproo/$partnerKey').onValue.listen((event) {
+      final data = event.snapshot.value as Map?;
+      if (data != null && mounted) {
+        setState(() {
+          final lat = data['lat'];
+          final lng = data['lng'];
+          if (lat != null && lng != null) {
+            _radarPartnerLat = (lat as num).toDouble();
+            _radarPartnerLng = (lng as num).toDouble();
+            _updateTurns(_getRotationTarget());
+          }
+        });
+        _checkProximityRadar();
+      }
+    });
+
+    // 2. Subscribe to high-frequency local geolocator stream for ourselves
+    const settings = LocationSettings(
+      accuracy: LocationAccuracy.bestForNavigation,
+      distanceFilter: 1, // update every meter
+    );
+    _myPositionSub = Geolocator.getPositionStream(locationSettings: settings).listen((pos) {
+      if (mounted) {
+        setState(() {
+          _myPosition = pos;
+          _updateTurns(_getRotationTarget());
+        });
+        _checkProximityRadar();
+      }
+    });
+
+    // 3. Periodic timer to write our position to RTDB at 3Hz (every 333ms)
+    _rtdbProximityTimer = Timer.periodic(const Duration(milliseconds: 333), (timer) async {
+      final pos = _myPosition;
+      if (pos != null) {
+        await _rtdb.ref('proximity_sync/ray-aproo/$myKey').set({
+          'lat': pos.latitude,
+          'lng': pos.longitude,
+          'active': true,
+          'updatedAt': ServerValue.timestamp,
+        });
+      }
+    });
+  }
+
+  void _stopProximityRadar() {
+    if (!_proximityActive) return;
+    debugPrint('Stopping Proximity Radar...');
+    
+    _rtdbProximitySub?.cancel();
+    _rtdbProximitySub = null;
+    
+    _myPositionSub?.cancel();
+    _myPositionSub = null;
+    
+    _rtdbProximityTimer?.cancel();
+    _rtdbProximityTimer = null;
+    
+    final myKey = _auth.isRay ? 'ray' : 'aproo';
+    _rtdb.ref('proximity_sync/ray-aproo/$myKey/active').set(false);
+
+    if (mounted) {
+      setState(() {
+        _proximityActive = false;
+        _radarPartnerLat = null;
+        _radarPartnerLng = null;
+      });
+    }
+  }
+
+  void _checkProximityRadar() {
+    final dist = _distanceKm;
+    if (dist != null && dist <= 0.15) { // 150m
+      if (!_proximityActive) {
+        _startProximityRadar();
+      }
+    } else {
+      if (_proximityActive) {
+        _stopProximityRadar();
+      }
+    }
   }
 
   void _initPoke() {
@@ -193,6 +318,7 @@ class _HomeScreenState extends State<HomeScreen>
         if (initialPartner != null) _locationLoading = false;
         _updateTurns(_getRotationTarget());
       });
+      _checkProximityRadar();
     }
 
     final myPos = await LocationService.getCurrentPosition();
@@ -201,6 +327,7 @@ class _HomeScreenState extends State<HomeScreen>
         _myPosition = myPos;
         _updateTurns(_getRotationTarget());
       });
+      _checkProximityRadar();
       await LocationService.updateIfNeeded(myPos, myKey, _auth.myName);
     }
 
@@ -212,6 +339,7 @@ class _HomeScreenState extends State<HomeScreen>
           _isRefreshing = false;
           _updateTurns(_getRotationTarget());
         });
+        _checkProximityRadar();
       }
     });
   }
@@ -485,6 +613,13 @@ class _HomeScreenState extends State<HomeScreen>
       headline = 'Searching...';
     } else if (dist == null) {
       headline = 'Waiting for ${_auth.partnerName}';
+    } else if (_proximityActive) {
+      final meters = dist * 1000;
+      if (meters < 3) {
+        headline = "Right beside you!";
+      } else {
+        headline = "${meters.toStringAsFixed(0)}m away";
+      }
     } else if (dist < 0.01) {
       headline = "Right beside each other";
     } else {
@@ -496,22 +631,35 @@ class _HomeScreenState extends State<HomeScreen>
       constraints: const BoxConstraints(maxHeight: 180),
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [
-            Color(0xFF1E1716), // Dark rich chocolate
-            Color(0xFF261D1C), // Deep charcoal chocolate
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
+        gradient: _proximityActive
+            ? const LinearGradient(
+                colors: [
+                  Color(0xFF0D3A2F), // Glowing deep emerald green
+                  Color(0xFF06251E), // Dark jade / black green
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              )
+            : const LinearGradient(
+                colors: [
+                  Color(0xFF1E1716), // Dark rich chocolate
+                  Color(0xFF261D1C), // Deep charcoal chocolate
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
         borderRadius: BorderRadius.circular(24),
         border: Border.all(
-          color: const Color(0xFFE8715A).withValues(alpha: 0.15),
+          color: _proximityActive
+              ? const Color(0xFF10B981).withValues(alpha: 0.20)
+              : const Color(0xFFE8715A).withValues(alpha: 0.15),
           width: 1.5,
         ),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFFE8715A).withValues(alpha: 0.08),
+            color: _proximityActive
+                ? const Color(0xFF10B981).withValues(alpha: 0.08)
+                : const Color(0xFFE8715A).withValues(alpha: 0.08),
             blurRadius: 20,
             offset: const Offset(0, 10),
           )
@@ -550,7 +698,13 @@ class _HomeScreenState extends State<HomeScreen>
           ),
           
           GestureDetector(
-            onTap: _forceRefresh,
+            onTap: () {
+              if (_proximityActive) {
+                HapticFeedback.lightImpact();
+              } else {
+                _forceRefresh();
+              }
+            },
             behavior: HitTestBehavior.opaque,
             child: Row(
               children: [
@@ -588,7 +742,9 @@ class _HomeScreenState extends State<HomeScreen>
                         shape: BoxShape.circle,
                         color: Colors.black.withValues(alpha: 0.25),
                         border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.08),
+                          color: _proximityActive
+                              ? const Color(0xFF10B981).withValues(alpha: 0.20)
+                              : Colors.white.withValues(alpha: 0.08),
                           width: 1.5,
                         ),
                         boxShadow: [
@@ -598,35 +754,65 @@ class _HomeScreenState extends State<HomeScreen>
                           ),
                         ],
                       ),
-                      child: Center(
-                        child: AnimatedRotation(
-                          turns: _turns,
-                          duration: const Duration(milliseconds: 300),
-                          curve: Curves.easeOutCubic,
-                          child: Stack(
-                            alignment: Alignment.center,
-                            children: [
-                              // Subtle background glow arrow
-                              Opacity(
-                                opacity: 0.25,
-                                child: Transform.translate(
-                                  offset: const Offset(0, -1),
-                                  child: const Icon(
-                                    Icons.navigation_rounded,
-                                    color: AppTheme.primary,
-                                    size: 46,
-                                  ),
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          if (_proximityActive) ...[
+                            // Concentric scanning circles
+                            Container(
+                              width: 60,
+                              height: 60,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: const Color(0xFF10B981).withValues(alpha: 0.08),
+                                  width: 1,
                                 ),
                               ),
-                              // Primary arrow
-                              const Icon(
-                                Icons.navigation_rounded,
-                                color: AppTheme.primary,
-                                size: 36,
+                            ),
+                            Container(
+                              width: 30,
+                              height: 30,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: const Color(0xFF10B981).withValues(alpha: 0.05),
+                                  width: 1,
+                                ),
                               ),
-                            ],
+                            ),
+                          ],
+                          Center(
+                            child: AnimatedRotation(
+                              turns: _turns,
+                              duration: const Duration(milliseconds: 300),
+                              curve: Curves.easeOutCubic,
+                              child: Stack(
+                                alignment: Alignment.center,
+                                children: [
+                                  // Subtle background glow arrow
+                                  Opacity(
+                                    opacity: 0.25,
+                                    child: Transform.translate(
+                                      offset: const Offset(0, -1),
+                                      child: Icon(
+                                        Icons.navigation_rounded,
+                                        color: _proximityActive ? const Color(0xFF10B981) : AppTheme.primary,
+                                        size: 46,
+                                      ),
+                                    ),
+                                  ),
+                                  // Primary arrow
+                                  Icon(
+                                    Icons.navigation_rounded,
+                                    color: _proximityActive ? const Color(0xFF10B981) : AppTheme.primary,
+                                    size: 36,
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
-                        ),
+                        ],
                       ),
                     ),
                   ],
@@ -646,12 +832,12 @@ class _HomeScreenState extends State<HomeScreen>
                             width: 6,
                             height: 6,
                             decoration: BoxDecoration(
-                              color: partnerOnline ? Colors.green : Colors.transparent,
+                              color: _proximityActive ? const Color(0xFF10B981) : (partnerOnline ? Colors.green : Colors.transparent),
                               shape: BoxShape.circle,
-                              boxShadow: partnerOnline 
+                              boxShadow: (_proximityActive || partnerOnline)
                                   ? [
                                       BoxShadow(
-                                        color: Colors.green.withValues(alpha: 0.8),
+                                        color: (_proximityActive ? const Color(0xFF10B981) : Colors.green).withValues(alpha: 0.8),
                                         blurRadius: 6,
                                         spreadRadius: 1,
                                       )
@@ -659,16 +845,18 @@ class _HomeScreenState extends State<HomeScreen>
                                   : null,
                             ),
                           ),
-                          if (partnerOnline) const SizedBox(width: 6),
+                          if (_proximityActive || partnerOnline) const SizedBox(width: 6),
                           Text(
-                            partnerOnline ? 'ACTIVE NOW' : 'TETHERED',
+                            _proximityActive ? 'RADAR ACTIVE' : (partnerOnline ? 'ACTIVE NOW' : 'TETHERED'),
                             style: GoogleFonts.dmSans(
                               fontSize: 10,
                               fontWeight: FontWeight.bold,
                               letterSpacing: 1.5,
-                              color: partnerOnline 
-                                  ? Colors.green 
-                                  : AppTheme.primary.withValues(alpha: 0.7),
+                              color: _proximityActive
+                                  ? const Color(0xFF10B981)
+                                  : (partnerOnline
+                                      ? Colors.green
+                                      : AppTheme.primary.withValues(alpha: 0.7)),
                             ),
                           ),
                         ],
