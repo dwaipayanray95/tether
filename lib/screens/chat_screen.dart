@@ -336,39 +336,78 @@ class ChatScreenState extends State<ChatScreen> {
                 onPressed: closeSearch,
               )
             : null,
-        titleSpacing: _searchActive ? 0 : null,
+        titleSpacing: _searchActive ? 4 : null,
         title: _searchActive
-            ? TextField(
-                controller: _searchCtrl,
-                autofocus: true,
-                decoration: const InputDecoration(
-                  hintText: 'Search all messages…',
-                  border: InputBorder.none,
-                  hintStyle: TextStyle(color: AppTheme.textMuted),
+            ? Container(
+                height: 40,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.04),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: AppTheme.primary.withValues(alpha: 0.15),
+                    width: 1,
+                  ),
                 ),
-                style: const TextStyle(fontSize: 16),
-                onChanged: (v) => setState(() => _searchQuery = v.trim()),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.search_rounded,
+                      color: AppTheme.textMuted,
+                      size: 18,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextField(
+                        controller: _searchCtrl,
+                        autofocus: true,
+                        decoration: const InputDecoration(
+                          hintText: 'Search messages…',
+                          border: InputBorder.none,
+                          enabledBorder: InputBorder.none,
+                          focusedBorder: InputBorder.none,
+                          hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 14),
+                          contentPadding: EdgeInsets.symmetric(vertical: 10),
+                        ),
+                        style: const TextStyle(fontSize: 14, color: AppTheme.textDark),
+                        onChanged: (v) => setState(() => _searchQuery = v.trim()),
+                      ),
+                    ),
+                    if (_searchQuery.isNotEmpty)
+                      GestureDetector(
+                        onTap: () {
+                          _searchCtrl.clear();
+                          setState(() => _searchQuery = '');
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.all(2),
+                          decoration: const BoxDecoration(
+                            color: AppTheme.textMuted,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.close_rounded,
+                            color: Colors.white,
+                            size: 12,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
               )
             : const Text('Raayyy & Aproo'),
         actions: [
-          if (_searchActive)
-            _loadingAllMessages
-                ? const Padding(
-                    padding: EdgeInsets.all(14),
-                    child: SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  )
-                : IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () {
-                      _searchCtrl.clear();
-                      setState(() => _searchQuery = '');
-                    },
-                  )
-          else ...[
+          if (_searchActive) ...[
+            if (_loadingAllMessages)
+              const Padding(
+                padding: EdgeInsets.all(14),
+                child: SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+          ] else ...[
             IconButton(
               icon: const Icon(Icons.search_rounded),
               onPressed: _activateSearch,
