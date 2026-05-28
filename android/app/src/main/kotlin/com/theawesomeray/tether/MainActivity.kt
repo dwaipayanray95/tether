@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
+import android.os.BatteryManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -18,6 +19,27 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         musicChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
         registerMusicReceiver()
+
+        val batteryChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.theawesomeray.tether/battery")
+        batteryChannel.setMethodCallHandler { call, result ->
+            if (call.method == "getBatteryInfo") {
+                val intent = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+                val level = intent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+                val scale = intent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+                val batteryPct = if (level >= 0 && scale > 0) (level * 100 / scale) else -1
+                
+                val status = intent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+                val isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL
+                
+                val data = mapOf(
+                    "batteryLevel" to batteryPct,
+                    "isCharging" to isCharging
+                )
+                result.success(data)
+            } else {
+                result.notImplemented()
+            }
+        }
     }
 
     override fun onDestroy() {
