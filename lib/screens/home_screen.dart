@@ -76,9 +76,13 @@ class _HomeScreenState extends State<HomeScreen>
         1000;
   }
 
+  // Sticky Notes Stream Cache
+  late Stream<QuerySnapshot<Map<String, dynamic>>> _stickyNotesStream;
+
   @override
   void initState() {
     super.initState();
+    _stickyNotesStream = _firestore.stickyNotesStream(coupleId);
     _pokeController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 150),
@@ -161,12 +165,6 @@ class _HomeScreenState extends State<HomeScreen>
     }
     _turns += diff / 360.0;
     _lastTargetDegrees = targetDegrees;
-  }
-
-  String _getCardinalDirection(double bearing) {
-    const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
-    final index = ((bearing + 22.5) % 360 / 45).floor();
-    return directions[index];
   }
 
   void _initPoke() {
@@ -298,9 +296,9 @@ class _HomeScreenState extends State<HomeScreen>
             children: [
               _buildHeader(),
               const SizedBox(height: 20),
-              _buildStickyNotesBoard(),
-              const SizedBox(height: 28),
               _buildCompassCard(),
+              const SizedBox(height: 28),
+              _buildStickyNotesBoard(),
               const SizedBox(height: 20),
               _buildMusicCard(),
               const SizedBox(height: 20),
@@ -479,19 +477,8 @@ class _HomeScreenState extends State<HomeScreen>
     final partnerOnline = partnerLastSeen != null &&
         DateTime.now().difference(partnerLastSeen.toDate()).inMinutes < 1;
 
-    double? bearing;
-    if (_myPosition != null && _partnerLocation != null) {
-      final plat = _partnerLocation!['lat'] as double?;
-      final plng = _partnerLocation!['lng'] as double?;
-      if (plat != null && plng != null) {
-        bearing = _calculateBearing(
-          _myPosition!.latitude,
-          _myPosition!.longitude,
-          plat,
-          plng,
-        );
-      }
-    }
+    final partnerBattery = _auth.isRay ? _aprooBattery : _rayBattery;
+    final partnerMusic = _auth.isRay ? _aprooMusic : _rayMusic;
 
     String headline;
     if (_locationLoading && _partnerLocation == null) {
@@ -567,7 +554,7 @@ class _HomeScreenState extends State<HomeScreen>
             behavior: HitTestBehavior.opaque,
             child: Row(
               children: [
-                // Compass Dial Block
+                // Direction Arrow Dial
                 Stack(
                   alignment: Alignment.center,
                   children: [
@@ -580,8 +567,8 @@ class _HomeScreenState extends State<HomeScreen>
                           return Opacity(
                             opacity: (1.4 - value).clamp(0.0, 1.0),
                             child: Container(
-                              width: 110 * value,
-                              height: 110 * value,
+                              width: 90 * value,
+                              height: 90 * value,
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 border: Border.all(
@@ -593,122 +580,53 @@ class _HomeScreenState extends State<HomeScreen>
                           );
                         },
                       ),
-                    // Compass Face
+                    // Neat rotating Arrow
                     Container(
-                      width: 110,
-                      height: 110,
+                      width: 90,
+                      height: 90,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: Colors.black.withValues(alpha: 0.3),
+                        color: Colors.black.withValues(alpha: 0.25),
                         border: Border.all(
                           color: Colors.white.withValues(alpha: 0.08),
                           width: 1.5,
                         ),
-                      ),
-                      child: Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          // Ticks and direction labels (N, E, S, W)
-                          ...List.generate(4, (index) {
-                            final text = ['N', 'E', 'S', 'W'][index];
-                            final angle = index * math.pi / 2;
-                            return Transform.translate(
-                              offset: Offset(math.sin(angle) * 42, -math.cos(angle) * 42),
-                              child: Text(
-                                text,
-                                style: GoogleFonts.dmSans(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                  color: text == 'N' 
-                                      ? AppTheme.primary 
-                                      : Colors.white.withValues(alpha: 0.4),
-                                ),
-                              ),
-                            );
-                          }),
-                          
-                          // Subtle inner lines
-                          Container(
-                            width: 76,
-                            height: 76,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: Colors.white.withValues(alpha: 0.03),
-                                width: 1,
-                              ),
-                            ),
-                          ),
-                          
-                          // Rotating Glowing Coral Compass Needle
-                          AnimatedRotation(
-                            turns: _turns,
-                            duration: const Duration(milliseconds: 300),
-                            curve: Curves.easeOutCubic,
-                            child: Stack(
-                              alignment: Alignment.center,
-                              children: [
-                                // Glowing background of needle
-                                Transform.translate(
-                                  offset: const Offset(0, -22),
-                                  child: Container(
-                                    width: 12,
-                                    height: 36,
-                                    decoration: BoxDecoration(
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: AppTheme.primary.withValues(alpha: 0.6),
-                                          blurRadius: 12,
-                                          spreadRadius: 2,
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                                // Custom needle: Arrow pointing North (up) and tail pointing South (down)
-                                Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    // North Pointer (Warm Coral triangle)
-                                    ClipPath(
-                                      clipper: _CompassNeedleClipper(isNorth: true),
-                                      child: Container(
-                                        width: 10,
-                                        height: 32,
-                                        color: AppTheme.primary,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    // South Tail (Muted grayish triangle)
-                                    ClipPath(
-                                      clipper: _CompassNeedleClipper(isNorth: false),
-                                      child: Container(
-                                        width: 10,
-                                        height: 18,
-                                        color: Colors.white.withValues(alpha: 0.25),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                // Center pivot pin
-                                Container(
-                                  width: 8,
-                                  height: 8,
-                                  decoration: const BoxDecoration(
-                                    color: Colors.white,
-                                    shape: BoxShape.circle,
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.black26,
-                                        blurRadius: 2,
-                                      )
-                                    ]
-                                  ),
-                                ),
-                              ],
-                            ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.1),
+                            blurRadius: 10,
                           ),
                         ],
+                      ),
+                      child: Center(
+                        child: AnimatedRotation(
+                          turns: _turns,
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.easeOutCubic,
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              // Subtle background glow arrow
+                              Opacity(
+                                opacity: 0.25,
+                                child: Transform.translate(
+                                  offset: const Offset(0, -1),
+                                  child: const Icon(
+                                    Icons.navigation_rounded,
+                                    color: AppTheme.primary,
+                                    size: 46,
+                                  ),
+                                ),
+                              ),
+                              // Primary arrow
+                              const Icon(
+                                Icons.navigation_rounded,
+                                color: AppTheme.primary,
+                                size: 36,
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
                   ],
@@ -743,7 +661,7 @@ class _HomeScreenState extends State<HomeScreen>
                           ),
                           if (partnerOnline) const SizedBox(width: 6),
                           Text(
-                            partnerOnline ? 'LIVE' : 'COMPASS ACTIVE',
+                            partnerOnline ? 'ACTIVE NOW' : 'TETHERED',
                             style: GoogleFonts.dmSans(
                               fontSize: 10,
                               fontWeight: FontWeight.bold,
@@ -755,7 +673,7 @@ class _HomeScreenState extends State<HomeScreen>
                           ),
                         ],
                       ),
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 2),
                       Text(
                         headline,
                         style: GoogleFonts.playfairDisplay(
@@ -764,41 +682,111 @@ class _HomeScreenState extends State<HomeScreen>
                           fontWeight: FontWeight.w700,
                         ),
                       ),
-                      const SizedBox(height: 4),
-                      if (bearing != null && dist != null && dist >= 0.01) ...[
+                      if (locality != null && dist != null && dist >= 0.01) ...[
+                        const SizedBox(height: 2),
                         Text(
-                          'Heading ${_getCardinalDirection(bearing)} (${bearing.toStringAsFixed(0)}°)',
+                          locality,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: GoogleFonts.dmSans(
-                            color: Colors.white.withValues(alpha: 0.9),
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
+                            color: Colors.white.withValues(alpha: 0.5),
+                            fontSize: 12,
                           ),
                         ),
                       ],
-                      if (locality != null && dist != null && dist >= 0.01) ...[
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.location_on_outlined,
-                              color: Colors.white.withValues(alpha: 0.5),
-                              size: 14,
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          // Battery Indicator
+                          if (partnerBattery != null) ...[
+                            Builder(
+                              builder: (context) {
+                                final level = partnerBattery['level'] as int? ?? -1;
+                                final isCharging = partnerBattery['isCharging'] as bool? ?? false;
+                                
+                                IconData batteryIcon;
+                                if (level >= 90) {
+                                  batteryIcon = Icons.battery_full_rounded;
+                                } else if (level >= 60) {
+                                  batteryIcon = Icons.battery_5_bar_rounded;
+                                } else if (level >= 30) {
+                                  batteryIcon = Icons.battery_3_bar_rounded;
+                                } else {
+                                  batteryIcon = Icons.battery_alert_rounded;
+                                }
+
+                                return Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.05),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        batteryIcon,
+                                        size: 14,
+                                        color: level < 20 
+                                            ? Colors.redAccent 
+                                            : isCharging 
+                                                ? Colors.green 
+                                                : Colors.white70,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        '$level%${isCharging ? ' ⚡' : ''}',
+                                        style: GoogleFonts.dmSans(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w500,
+                                          color: Colors.white70,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }
                             ),
-                            const SizedBox(width: 4),
+                          ],
+                          
+                          if (partnerMusic != null && partnerMusic['isPlaying'] == true) ...[
+                            const SizedBox(width: 8),
+                            // Music Sync Indicator
                             Expanded(
-                              child: Text(
-                                locality,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: GoogleFonts.dmSans(
-                                  color: Colors.white.withValues(alpha: 0.5),
-                                  fontSize: 12,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.05),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(
+                                      Icons.music_note_rounded,
+                                      size: 14,
+                                      color: AppTheme.primary,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Expanded(
+                                      child: Text(
+                                        partnerMusic['track'] ?? 'Listening...',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: GoogleFonts.dmSans(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w500,
+                                          color: Colors.white70,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
                           ],
-                        ),
-                      ],
+                        ],
+                      ),
                     ],
                   ),
                 ),
@@ -1244,9 +1232,9 @@ class _HomeScreenState extends State<HomeScreen>
 
   Widget _buildStickyNotesBoard() {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: _firestore.stickyNotesStream(coupleId),
+      stream: _stickyNotesStream,
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
+        if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
           return const SizedBox(
             height: 155,
             child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
@@ -1849,32 +1837,3 @@ class _StickyNoteTile extends StatelessWidget {
         );
       }
     }
-
-class _CompassNeedleClipper extends CustomClipper<Path> {
-  final bool isNorth;
-
-  _CompassNeedleClipper({required this.isNorth});
-
-  @override
-  Path getClip(Size size) {
-    final path = Path();
-    if (isNorth) {
-      // Triangle pointing up
-      path.moveTo(size.width / 2, 0);
-      path.lineTo(size.width, size.height);
-      path.lineTo(0, size.height);
-    } else {
-      // Triangle pointing down
-      path.moveTo(0, 0);
-      path.lineTo(size.width, 0);
-      path.lineTo(size.width / 2, size.height);
-    }
-    path.close();
-    return path;
-  }
-
-  @override
-  bool shouldReclip(covariant _CompassNeedleClipper oldClipper) {
-    return oldClipper.isNorth != isNorth;
-  }
-}
