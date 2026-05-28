@@ -124,25 +124,28 @@ class _SearchScreenState extends State<SearchScreen> {
                     onChanged: (v) => setState(() => _query = v.trim()),
                   ),
                 ),
-                if (_query.isNotEmpty)
-                  GestureDetector(
-                    onTap: () {
+                GestureDetector(
+                  onTap: () {
+                    if (_query.isNotEmpty) {
                       _searchCtrl.clear();
                       setState(() => _query = '');
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.all(2),
-                      decoration: const BoxDecoration(
-                        color: AppTheme.textMuted,
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(
-                        Icons.close_rounded,
-                        color: Colors.white,
-                        size: 12,
-                      ),
+                    } else {
+                      Navigator.pop(context);
+                    }
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.05),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.close_rounded,
+                      color: AppTheme.textMuted,
+                      size: 14,
                     ),
                   ),
+                ),
               ],
             ),
           ),
