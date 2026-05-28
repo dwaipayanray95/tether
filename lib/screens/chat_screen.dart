@@ -373,25 +373,28 @@ class ChatScreenState extends State<ChatScreen> {
                         onChanged: (v) => setState(() => _searchQuery = v.trim()),
                       ),
                     ),
-                    if (_searchQuery.isNotEmpty)
-                      GestureDetector(
-                        onTap: () {
+                    GestureDetector(
+                      onTap: () {
+                        if (_searchQuery.isNotEmpty) {
                           _searchCtrl.clear();
                           setState(() => _searchQuery = '');
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.all(2),
-                          decoration: const BoxDecoration(
-                            color: AppTheme.textMuted,
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(
-                            Icons.close_rounded,
-                            color: Colors.white,
-                            size: 12,
-                          ),
+                        } else {
+                          closeSearch();
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.05),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.close_rounded,
+                          color: AppTheme.textMuted,
+                          size: 14,
                         ),
                       ),
+                    ),
                   ],
                 ),
               )
