@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -46,6 +47,13 @@ class _HomeScreenState extends State<HomeScreen>
   bool _locationLoading = true;
   bool _isRefreshing = false;
 
+  // Compass Sensor Stream
+  static const _compassChannel = EventChannel('com.theawesomeray.tether/compass');
+  StreamSubscription? _compassSub;
+  double _deviceHeading = 0.0;
+  double _lastTargetDegrees = 0.0;
+  double _turns = 0.0;
+
   // Last seen
   Timestamp? _rayLastSeen;
   Timestamp? _aprooLastSeen;
@@ -82,6 +90,7 @@ class _HomeScreenState extends State<HomeScreen>
     // Trigger location permission after the screen loads so the user sees the UI first
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initLocation();
+      _initCompass();
     });
     
     _initPresence();
@@ -94,7 +103,70 @@ class _HomeScreenState extends State<HomeScreen>
     _partnerLocSub?.cancel();
     _presenceSub?.cancel();
     _pokeSub?.cancel();
+    _compassSub?.cancel();
     super.dispose();
+  }
+
+  void _initCompass() {
+    try {
+      _compassSub = _compassChannel.receiveBroadcastStream().listen((event) {
+        if (mounted) {
+          setState(() {
+            _deviceHeading = event as double? ?? 0.0;
+            _updateTurns(_getRotationTarget());
+          });
+        }
+      }, onError: (err) {
+        debugPrint('Compass EventChannel error: $err');
+      });
+    } catch (e) {
+      debugPrint('Failed to initialize compass stream: $e');
+    }
+  }
+
+  double _calculateBearing(double lat1, double lon1, double lat2, double lon2) {
+    final dLon = (lon2 - lon1) * (math.pi / 180.0);
+    final lat1Rad = lat1 * (math.pi / 180.0);
+    final lat2Rad = lat2 * (math.pi / 180.0);
+    
+    final y = math.sin(dLon) * math.cos(lat2Rad);
+    final x = math.cos(lat1Rad) * math.sin(lat2Rad) - math.sin(lat1Rad) * math.cos(lat2Rad) * math.cos(dLon);
+    
+    final bearing = math.atan2(y, x) * (180.0 / math.pi);
+    return (bearing + 360.0) % 360.0;
+  }
+
+  double _getRotationTarget() {
+    final dist = _distanceKm;
+    if (dist == null || _myPosition == null || _partnerLocation == null) return 0.0;
+    final plat = _partnerLocation!['lat'] as double?;
+    final plng = _partnerLocation!['lng'] as double?;
+    if (plat == null || plng == null) return 0.0;
+    final b = _calculateBearing(
+      _myPosition!.latitude,
+      _myPosition!.longitude,
+      plat,
+      plng,
+    );
+    return (b - _deviceHeading) % 360.0;
+  }
+
+  void _updateTurns(double targetDegrees) {
+    double diff = targetDegrees - _lastTargetDegrees;
+    while (diff < -180.0) {
+      diff += 360.0;
+    }
+    while (diff > 180.0) {
+      diff -= 360.0;
+    }
+    _turns += diff / 360.0;
+    _lastTargetDegrees = targetDegrees;
+  }
+
+  String _getCardinalDirection(double bearing) {
+    const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+    final index = ((bearing + 22.5) % 360 / 45).floor();
+    return directions[index];
   }
 
   void _initPoke() {
@@ -121,12 +193,16 @@ class _HomeScreenState extends State<HomeScreen>
       setState(() {
         _partnerLocation = initialPartner;
         if (initialPartner != null) _locationLoading = false;
+        _updateTurns(_getRotationTarget());
       });
     }
 
     final myPos = await LocationService.getCurrentPosition();
     if (myPos != null && mounted) {
-      setState(() => _myPosition = myPos);
+      setState(() {
+        _myPosition = myPos;
+        _updateTurns(_getRotationTarget());
+      });
       await LocationService.updateIfNeeded(myPos, myKey, _auth.myName);
     }
 
@@ -136,6 +212,7 @@ class _HomeScreenState extends State<HomeScreen>
           _partnerLocation = snap.data();
           _locationLoading = false;
           _isRefreshing = false;
+          _updateTurns(_getRotationTarget());
         });
       }
     });
@@ -223,7 +300,7 @@ class _HomeScreenState extends State<HomeScreen>
               const SizedBox(height: 20),
               _buildStickyNotesBoard(),
               const SizedBox(height: 28),
-              _buildDistanceCard(),
+              _buildCompassCard(),
               const SizedBox(height: 20),
               _buildMusicCard(),
               const SizedBox(height: 20),
@@ -395,37 +472,67 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  Widget _buildDistanceCard() {
+  Widget _buildCompassCard() {
     final dist = _distanceKm;
     final locality = _partnerLocation?['locality'] as String?;
+    final partnerLastSeen = _auth.isRay ? _aprooLastSeen : _rayLastSeen;
+    final partnerOnline = partnerLastSeen != null &&
+        DateTime.now().difference(partnerLastSeen.toDate()).inMinutes < 1;
+
+    double? bearing;
+    if (_myPosition != null && _partnerLocation != null) {
+      final plat = _partnerLocation!['lat'] as double?;
+      final plng = _partnerLocation!['lng'] as double?;
+      if (plat != null && plng != null) {
+        bearing = _calculateBearing(
+          _myPosition!.latitude,
+          _myPosition!.longitude,
+          plat,
+          plng,
+        );
+      }
+    }
 
     String headline;
-
     if (_locationLoading && _partnerLocation == null) {
       headline = 'Searching...';
     } else if (dist == null) {
       headline = 'Waiting for ${_auth.partnerName}';
-    } else if (dist < 1.0) {
-      headline = "You're right beside each other";
+    } else if (dist < 0.01) {
+      headline = "Right beside each other";
     } else {
-      headline = '${_auth.partnerName} is ${_formatKm(dist)} away';
+      headline = '${_formatKm(dist)} away';
     }
 
     return Container(
       width: double.infinity,
-      constraints: const BoxConstraints(minHeight: 140),
-      padding: const EdgeInsets.all(24),
+      constraints: const BoxConstraints(maxHeight: 180),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [Color(0xFFE8715A), Color(0xFFB5838D)],
+          colors: [
+            Color(0xFF1E1716), // Dark rich chocolate
+            Color(0xFF261D1C), // Deep charcoal chocolate
+          ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+          color: const Color(0xFFE8715A).withValues(alpha: 0.15),
+          width: 1.5,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFFE8715A).withValues(alpha: 0.08),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          )
+        ],
       ),
       child: Stack(
         children: [
-          // Refresh / Loading Icon
+          // Silent Ping Overlay / Refresh Trigger Button
           Positioned(
             top: 0,
             right: 0,
@@ -435,45 +542,268 @@ class _HomeScreenState extends State<HomeScreen>
                     height: 18,
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
-                      color: Colors.white70,
+                      color: AppTheme.primary,
                     ),
                   )
                 : GestureDetector(
                     onTap: _forceRefresh,
-                    child: const Icon(
-                      Icons.refresh_rounded,
-                      color: Colors.white70,
-                      size: 20,
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.05),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.radar_rounded,
+                        color: AppTheme.primary,
+                        size: 20,
+                      ),
                     ),
                   ),
           ),
-          Center(
-            child: _locationLoading && _partnerLocation == null
-                ? const CircularProgressIndicator(color: Colors.white54)
-                : Column(
+          
+          GestureDetector(
+            onTap: _forceRefresh,
+            behavior: HitTestBehavior.opaque,
+            child: Row(
+              children: [
+                // Compass Dial Block
+                Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    // Radar ping pulse outer ring
+                    if (_isRefreshing)
+                      TweenAnimationBuilder<double>(
+                        tween: Tween(begin: 1.0, end: 1.4),
+                        duration: const Duration(seconds: 1),
+                        builder: (context, value, child) {
+                          return Opacity(
+                            opacity: (1.4 - value).clamp(0.0, 1.0),
+                            child: Container(
+                              width: 110 * value,
+                              height: 110 * value,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: AppTheme.primary.withValues(alpha: 0.4),
+                                  width: 2,
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    // Compass Face
+                    Container(
+                      width: 110,
+                      height: 110,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.black.withValues(alpha: 0.3),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.08),
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          // Ticks and direction labels (N, E, S, W)
+                          ...List.generate(4, (index) {
+                            final text = ['N', 'E', 'S', 'W'][index];
+                            final angle = index * math.pi / 2;
+                            return Transform.translate(
+                              offset: Offset(math.sin(angle) * 42, -math.cos(angle) * 42),
+                              child: Text(
+                                text,
+                                style: GoogleFonts.dmSans(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  color: text == 'N' 
+                                      ? AppTheme.primary 
+                                      : Colors.white.withValues(alpha: 0.4),
+                                ),
+                              ),
+                            );
+                          }),
+                          
+                          // Subtle inner lines
+                          Container(
+                            width: 76,
+                            height: 76,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.03),
+                                width: 1,
+                              ),
+                            ),
+                          ),
+                          
+                          // Rotating Glowing Coral Compass Needle
+                          AnimatedRotation(
+                            turns: _turns,
+                            duration: const Duration(milliseconds: 300),
+                            curve: Curves.easeOutCubic,
+                            child: Stack(
+                              alignment: Alignment.center,
+                              children: [
+                                // Glowing background of needle
+                                Transform.translate(
+                                  offset: const Offset(0, -22),
+                                  child: Container(
+                                    width: 12,
+                                    height: 36,
+                                    decoration: BoxDecoration(
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: AppTheme.primary.withValues(alpha: 0.6),
+                                          blurRadius: 12,
+                                          spreadRadius: 2,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                                // Custom needle: Arrow pointing North (up) and tail pointing South (down)
+                                Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    // North Pointer (Warm Coral triangle)
+                                    ClipPath(
+                                      clipper: _CompassNeedleClipper(isNorth: true),
+                                      child: Container(
+                                        width: 10,
+                                        height: 32,
+                                        color: AppTheme.primary,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    // South Tail (Muted grayish triangle)
+                                    ClipPath(
+                                      clipper: _CompassNeedleClipper(isNorth: false),
+                                      child: Container(
+                                        width: 10,
+                                        height: 18,
+                                        color: Colors.white.withValues(alpha: 0.25),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                // Center pivot pin
+                                Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: const BoxDecoration(
+                                    color: Colors.white,
+                                    shape: BoxShape.circle,
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black26,
+                                        blurRadius: 2,
+                                      )
+                                    ]
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                
+                const SizedBox(width: 20),
+                
+                // Spatial & Connection Details
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Text(headline,
-                          textAlign: TextAlign.center,
-                          style: GoogleFonts.playfairDisplay(
-                            color: Colors.white,
-                            fontSize: headline.length > 24 ? 21 : 27,
-                            fontWeight: FontWeight.w700,
-                            height: 1.2,
-                          )),
-                      if (locality != null && dist != null && dist >= 1.0) ...[
-                        const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Container(
+                            width: 6,
+                            height: 6,
+                            decoration: BoxDecoration(
+                              color: partnerOnline ? Colors.green : Colors.transparent,
+                              shape: BoxShape.circle,
+                              boxShadow: partnerOnline 
+                                  ? [
+                                      BoxShadow(
+                                        color: Colors.green.withValues(alpha: 0.8),
+                                        blurRadius: 6,
+                                        spreadRadius: 1,
+                                      )
+                                    ]
+                                  : null,
+                            ),
+                          ),
+                          if (partnerOnline) const SizedBox(width: 6),
+                          Text(
+                            partnerOnline ? 'LIVE' : 'COMPASS ACTIVE',
+                            style: GoogleFonts.dmSans(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 1.5,
+                              color: partnerOnline 
+                                  ? Colors.green 
+                                  : AppTheme.primary.withValues(alpha: 0.7),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        headline,
+                        style: GoogleFonts.playfairDisplay(
+                          color: Colors.white,
+                          fontSize: headline.length > 18 ? 20 : 24,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      if (bearing != null && dist != null && dist >= 0.01) ...[
                         Text(
-                          'Currently in $locality',
+                          'Heading ${_getCardinalDirection(bearing)} (${bearing.toStringAsFixed(0)}°)',
                           style: GoogleFonts.dmSans(
-                            color: Colors.white.withValues(alpha: 0.7),
-                            fontSize: 14,
+                            color: Colors.white.withValues(alpha: 0.9),
+                            fontSize: 13,
                             fontWeight: FontWeight.w500,
                           ),
                         ),
                       ],
+                      if (locality != null && dist != null && dist >= 0.01) ...[
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.location_on_outlined,
+                              color: Colors.white.withValues(alpha: 0.5),
+                              size: 14,
+                            ),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                locality,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.dmSans(
+                                  color: Colors.white.withValues(alpha: 0.5),
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ],
                   ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -1519,3 +1849,32 @@ class _StickyNoteTile extends StatelessWidget {
         );
       }
     }
+
+class _CompassNeedleClipper extends CustomClipper<Path> {
+  final bool isNorth;
+
+  _CompassNeedleClipper({required this.isNorth});
+
+  @override
+  Path getClip(Size size) {
+    final path = Path();
+    if (isNorth) {
+      // Triangle pointing up
+      path.moveTo(size.width / 2, 0);
+      path.lineTo(size.width, size.height);
+      path.lineTo(0, size.height);
+    } else {
+      // Triangle pointing down
+      path.moveTo(0, 0);
+      path.lineTo(size.width, 0);
+      path.lineTo(size.width / 2, size.height);
+    }
+    path.close();
+    return path;
+  }
+
+  @override
+  bool shouldReclip(covariant _CompassNeedleClipper oldClipper) {
+    return oldClipper.isNorth != isNorth;
+  }
+}
