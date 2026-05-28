@@ -373,23 +373,6 @@ class ChatScreenState extends State<ChatScreen> {
                         onChanged: (v) => setState(() => _searchQuery = v.trim()),
                       ),
                     ),
-                    GestureDetector(
-                      onTap: () {
-                        closeSearch();
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.all(4),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.05),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(
-                          Icons.close_rounded,
-                          color: AppTheme.textMuted,
-                          size: 14,
-                        ),
-                      ),
-                    ),
                   ],
                 ),
               )
