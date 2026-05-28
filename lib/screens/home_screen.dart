@@ -216,14 +216,14 @@ class _HomeScreenState extends State<HomeScreen>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _buildHeader(),
+              const SizedBox(height: 20),
+              _buildStickyNotesBoard(),
               const SizedBox(height: 28),
               _buildDistanceCard(),
               const SizedBox(height: 20),
               _buildMusicCard(),
               const SizedBox(height: 20),
               _buildPokeCard(),
-              const SizedBox(height: 20),
-              _buildStickyNotesBoard(),
               const SizedBox(height: 20),
               _buildQuickActions(),
             ],
@@ -815,20 +815,20 @@ class _HomeScreenState extends State<HomeScreen>
             Row(
               children: [
                 Container(
-                  padding: const EdgeInsets.all(8),
+                  padding: const EdgeInsets.all(6),
                   decoration: BoxDecoration(
                     color: AppTheme.primaryLight,
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(8),
                   ),
                   child: const Icon(Icons.push_pin_rounded,
-                      color: AppTheme.primary, size: 20),
+                      color: AppTheme.primary, size: 16),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 10),
                 Text(
                   'Sticky Notes',
                   style: GoogleFonts.dmSans(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
                     color: AppTheme.textDark,
                   ),
                 ),
@@ -836,12 +836,14 @@ class _HomeScreenState extends State<HomeScreen>
             ),
             IconButton(
               icon: const Icon(Icons.add_circle_outline_rounded,
-                  color: AppTheme.primary, size: 24),
+                  color: AppTheme.primary, size: 20),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
               onPressed: _showAddNoteSheet,
             ),
           ],
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
         StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
           stream: _firestore.stickyNotesStream(coupleId),
           builder: (context, snapshot) {

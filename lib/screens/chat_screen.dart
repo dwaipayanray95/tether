@@ -71,8 +71,6 @@ class ChatScreenState extends State<ChatScreen> {
   bool _hasMore = true;
   bool _initialLoading = true;
   StreamSubscription<List<Message>>? _streamSub;
-  StreamSubscription? _presenceSub;
-  DateTime? _partnerLastSeen;
 
   // Highlight
   String? _highlightedId;
@@ -98,7 +96,6 @@ class ChatScreenState extends State<ChatScreen> {
     super.initState();
     NotificationService.chatIsOpen = true;
     _loadInitialMessages();
-    _initPresence();
     _itemPositionsListener.itemPositions.addListener(_onPositionsChanged);
   }
 
@@ -106,7 +103,6 @@ class ChatScreenState extends State<ChatScreen> {
   void dispose() {
     NotificationService.chatIsOpen = false;
     _streamSub?.cancel();
-    _presenceSub?.cancel();
     _itemPositionsListener.itemPositions.removeListener(_onPositionsChanged);
     _textCtrl.dispose();
     _searchCtrl.dispose();
@@ -144,21 +140,6 @@ class ChatScreenState extends State<ChatScreen> {
       _messages = [...newOnes, ...updated];
     });
     _firestore.markMessagesRead(_coupleId, _myUid);
-  }
-
-  void _initPresence() {
-    _presenceSub = _firestore.presenceStream().listen((snap) {
-      final data = snap.data();
-      if (mounted && data != null) {
-        final partnerKey = _auth.isRay ? 'aproo' : 'ray';
-        final p = data[partnerKey] as Map<String, dynamic>?;
-        if (p != null) {
-          setState(() {
-            _partnerLastSeen = (p['lastSeen'] as Timestamp?)?.toDate();
-          });
-        }
-      }
-    });
   }
 
   void _onPositionsChanged() {
@@ -368,46 +349,7 @@ class ChatScreenState extends State<ChatScreen> {
                 style: const TextStyle(fontSize: 16),
                 onChanged: (v) => setState(() => _searchQuery = v.trim()),
               )
-            : Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  const Text('Raayyy & Aproo'),
-                  const SizedBox(height: 2),
-                  Builder(
-                    builder: (context) {
-                      final partnerOnline = _partnerLastSeen != null &&
-                          DateTime.now().difference(_partnerLastSeen!).inMinutes < 1;
-                      return Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            width: 6,
-                            height: 6,
-                            decoration: BoxDecoration(
-                              color: partnerOnline ? Colors.green : AppTheme.textMuted.withValues(alpha: 0.5),
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          const SizedBox(width: 5),
-                          Text(
-                            partnerOnline
-                                ? 'Active now'
-                                : (_partnerLastSeen == null
-                                    ? 'Offline'
-                                    : 'Active ${timeago.format(_partnerLastSeen!, locale: 'en_short')}'),
-                            style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.normal,
-                              color: AppTheme.textMuted,
-                            ),
-                          ),
-                        ],
-                      );
-                    }
-                  ),
-                ],
-              ),
+            : const Text('Raayyy & Aproo'),
         actions: [
           if (_searchActive)
             _loadingAllMessages
