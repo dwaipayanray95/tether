@@ -43,7 +43,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _firestore.updatePresence(_myPresenceKey, isOnline: true);
+    _firestore.updatePresence(_myPresenceKey);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // Handle notification-triggered navigation on cold start
       _handlePendingNotification();
@@ -243,18 +243,11 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     LogService.log('App lifecycle state changed: $state');
     switch (state) {
       case AppLifecycleState.resumed:
-        _firestore.updatePresence(_myPresenceKey, isOnline: true);
+        _firestore.updatePresence(_myPresenceKey);
         _checkForUpdate();
-        // NotificationService sets pendingCallId/pendingTab from onMessageOpenedApp
-        // or the async getNotificationAppLaunchDetails callback — consume them here.
         WidgetsBinding.instance.addPostFrameCallback((_) {
           _handlePendingNotification();
         });
-        break;
-      case AppLifecycleState.paused:
-      case AppLifecycleState.detached:
-      case AppLifecycleState.hidden:
-        _firestore.updatePresence(_myPresenceKey, isOnline: false);
         break;
       default:
         break;

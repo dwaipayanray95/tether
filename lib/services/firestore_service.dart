@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../models/todo_model.dart';
 import '../models/comment_model.dart';
 import '../models/message_model.dart';
@@ -59,9 +60,9 @@ class FirestoreService {
     );
   }
 
-  Future<void> toggleTodo(String coupleId, TodoItem todo) {
+  Future<void> toggleTodo(String coupleId, TodoItem todo) async {
     final nextIsDone = !todo.isDone;
-    return _db
+    await _db
         .collection('couples')
         .doc(coupleId)
         .collection('todos')
@@ -70,6 +71,12 @@ class FirestoreService {
       'isDone': nextIsDone,
       'completedAt': nextIsDone ? DateTime.now().toIso8601String() : null,
     });
+    
+    final email = FirebaseAuth.instance.currentUser?.email;
+    if (email != null) {
+      final key = email == 'ray@redacted.invalid' ? 'ray' : 'aproo';
+      await updatePresence(key);
+    }
   }
 
   Future<void> updateTodoDetails(
@@ -266,12 +273,11 @@ class FirestoreService {
 
   // ── Presence / last seen ─────────────────────────────────────────────────
 
-  Future<void> updatePresence(String myKey, {bool isOnline = true}) async {
-    LogService.log('Updating presence for $myKey: ${isOnline ? 'ONLINE' : 'OFFLINE'}');
+  Future<void> updatePresence(String myKey) async {
+    LogService.log('Updating presence for $myKey');
     await _db.doc('couples/ray-aproo/status/presence').set({
       myKey: {
         'lastSeen': FieldValue.serverTimestamp(),
-        'isOnline': isOnline,
       }
     }, SetOptions(merge: true));
   }

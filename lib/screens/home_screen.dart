@@ -48,9 +48,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   // Last seen
   Timestamp? _rayLastSeen;
-  bool _rayIsOnline = false;
   Timestamp? _aprooLastSeen;
-  bool _aprooIsOnline = false;
   Map<String, dynamic>? _rayMusic;
   Map<String, dynamic>? _aprooMusic;
 
@@ -172,12 +170,10 @@ class _HomeScreenState extends State<HomeScreen>
 
           if (r != null) {
             _rayLastSeen = r['lastSeen'] as Timestamp?;
-            _rayIsOnline = r['isOnline'] as bool? ?? false;
             _rayMusic = r['music'] != null ? Map<String, dynamic>.from(r['music'] as Map) : null;
           }
           if (a != null) {
             _aprooLastSeen = a['lastSeen'] as Timestamp?;
-            _aprooIsOnline = a['isOnline'] as bool? ?? false;
             _aprooMusic = a['music'] != null ? Map<String, dynamic>.from(a['music'] as Map) : null;
           }
         });
@@ -199,6 +195,8 @@ class _HomeScreenState extends State<HomeScreen>
     HapticFeedback.heavyImpact();
     
     await _firestore.sendPoke(coupleId, myUid, _auth.myName);
+    final myKey = _auth.isRay ? 'ray' : 'aproo';
+    await _firestore.updatePresence(myKey);
 
     Future.delayed(const Duration(seconds: 3), () {
       if (mounted) {
@@ -244,8 +242,9 @@ class _HomeScreenState extends State<HomeScreen>
             : 'Good evening';
 
     final partnerName = _auth.partnerName;
-    final partnerOnline = _auth.isRay ? _aprooIsOnline : _rayIsOnline;
     final partnerLastSeen = _auth.isRay ? _aprooLastSeen : _rayLastSeen;
+    final partnerOnline = partnerLastSeen != null &&
+        DateTime.now().difference(partnerLastSeen.toDate()).inMinutes < 1;
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
