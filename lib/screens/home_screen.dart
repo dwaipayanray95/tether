@@ -870,36 +870,36 @@ class _HomeScreenState extends State<HomeScreen>
         _showAddNoteSheet();
       },
       child: Container(
-        width: 145,
+        width: 85,
         margin: const EdgeInsets.only(right: 14),
         decoration: BoxDecoration(
           color: AppTheme.primaryLight.withValues(alpha: 0.35),
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: AppTheme.primary.withValues(alpha: 0.25),
-            width: 1.5,
+            color: AppTheme.primary.withValues(alpha: 0.2),
+            width: 1.2,
           ),
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              padding: const EdgeInsets.all(10),
+              padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: AppTheme.primary.withValues(alpha: 0.1),
+                color: AppTheme.primary.withValues(alpha: 0.08),
                 shape: BoxShape.circle,
               ),
               child: const Icon(
                 Icons.add_rounded,
                 color: AppTheme.primary,
-                size: 24,
+                size: 20,
               ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 8),
             Text(
-              'Add Sticky',
+              'Add Note',
               style: GoogleFonts.dmSans(
-                fontSize: 12,
+                fontSize: 11,
                 fontWeight: FontWeight.w600,
                 color: AppTheme.primary,
               ),
@@ -909,6 +909,8 @@ class _HomeScreenState extends State<HomeScreen>
       ),
     );
   }
+
+  // ── Sticky Notes Board & Sheets ────────────────────────────────────────────
 
   Widget _buildStickyNotesBoard() {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
@@ -928,10 +930,10 @@ class _HomeScreenState extends State<HomeScreen>
             padding: const EdgeInsets.symmetric(vertical: 4),
             itemCount: docs.length + 1,
             itemBuilder: (context, index) {
-              if (index == 0) {
+              if (index == docs.length) {
                 return _buildAddNoteTile(context);
               }
-              final doc = docs[index - 1];
+              final doc = docs[index];
               final id = doc.id;
               final text = doc['text'] as String? ?? '';
               final colorIdx = doc['colorIndex'] as int? ?? 0;
