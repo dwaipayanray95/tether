@@ -51,9 +51,11 @@ class _HomeScreenState extends State<HomeScreen>
   // Proximity Sync via RTDB (AirTag mode)
   final _rtdb = FirebaseDatabase.instance;
   StreamSubscription? _rtdbProximitySub;
+  StreamSubscription? _partnerRadarActiveSub;
   StreamSubscription<Position>? _myPositionSub;
   Timer? _rtdbProximityTimer;
   bool _proximityActive = false;
+  bool _partnerRadarActive = false;
   double? _radarPartnerLat;
   double? _radarPartnerLng;
 
@@ -117,6 +119,17 @@ class _HomeScreenState extends State<HomeScreen>
     
     _initPresence();
     _initPoke();
+
+    final partnerKey = _auth.isRay ? 'aproo' : 'ray';
+    _partnerRadarActiveSub = _rtdb.ref('proximity_sync/ray-aproo/$partnerKey/active').onValue.listen((event) {
+      final active = event.snapshot.value as bool? ?? false;
+      if (mounted) {
+        setState(() {
+          _partnerRadarActive = active;
+        });
+        _checkProximityRadar();
+      }
+    });
   }
 
   @override
@@ -127,6 +140,7 @@ class _HomeScreenState extends State<HomeScreen>
     _pokeSub?.cancel();
     _compassSub?.cancel();
     _rtdbProximitySub?.cancel();
+    _partnerRadarActiveSub?.cancel();
     _myPositionSub?.cancel();
     _rtdbProximityTimer?.cancel();
     super.dispose();
@@ -281,7 +295,8 @@ class _HomeScreenState extends State<HomeScreen>
 
   void _checkProximityRadar() {
     final dist = _distanceKm;
-    if (dist != null && dist <= 0.15) { // 150m
+    final shouldBeActive = (dist != null && dist <= 0.15) || _partnerRadarActive;
+    if (shouldBeActive) {
       if (!_proximityActive) {
         _startProximityRadar();
       }
@@ -731,7 +746,7 @@ class _HomeScreenState extends State<HomeScreen>
                           Center(
                             child: AnimatedRotation(
                               turns: _turns,
-                              duration: const Duration(milliseconds: 300),
+                              duration: Duration(milliseconds: _proximityActive ? 50 : 300),
                               curve: Curves.easeOutCubic,
                               child: Stack(
                                 alignment: Alignment.center,
@@ -1237,6 +1252,34 @@ class _HomeScreenState extends State<HomeScreen>
                   ),
                 ),
             ],
+          ),
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: Divider(color: AppTheme.divider, height: 1),
+          ),
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: AppTheme.background,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.lightbulb_rounded, size: 16, color: Colors.amber),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Syncs automatically with Spotify, YT Music & Apple Music! For Spotify, ensure "Device Broadcast Status" is enabled in Spotify Settings.',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 10.5,
+                      color: AppTheme.textMuted,
+                      height: 1.3,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
