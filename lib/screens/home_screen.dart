@@ -447,6 +447,44 @@ class _HomeScreenState extends State<HomeScreen>
               const SizedBox(height: 14),
               _buildCompassCard(),
               const SizedBox(height: 18),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Our Sticky Board',
+                    style: GoogleFonts.playfairDisplay(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: AppTheme.textDark,
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: _showStickyArchiveSheet,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primaryLight,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.archive_rounded, color: AppTheme.primary, size: 14),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Archive',
+                            style: GoogleFonts.dmSans(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: AppTheme.primary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
               _buildStickyNotesBoard(),
               const SizedBox(height: 14),
               _buildMusicCard(),
@@ -1447,7 +1485,10 @@ class _HomeScreenState extends State<HomeScreen>
             child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
           );
         }
-        final docs = snapshot.data?.docs ?? [];
+        final docs = (snapshot.data?.docs ?? []).where((d) {
+          final data = d.data();
+          return data['isArchived'] != true;
+        }).toList();
         return SizedBox(
           height: 155,
           child: ListView.builder(
@@ -1473,7 +1514,7 @@ class _HomeScreenState extends State<HomeScreen>
                 author: author,
                 isMe: authorUid == _auth.currentUser!.uid,
                 date: date,
-                onDelete: () => _confirmDeleteNote(id),
+                onDelete: () => _confirmArchiveNote(id),
               );
             },
           ),
@@ -1628,28 +1669,218 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  void _confirmDeleteNote(String noteId) {
+  void _confirmArchiveNote(String noteId) {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('Peel off note?'),
-        content: const Text('This sticky note will be removed permanently from the board.'),
+        content: const Text('This sticky note will be moved to the archive instead of deleted.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Keep it', style: TextStyle(color: AppTheme.textMuted)),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primary),
             onPressed: () {
               HapticFeedback.heavyImpact();
-              _firestore.deleteStickyNote(coupleId, noteId);
+              _firestore.archiveStickyNote(coupleId, noteId);
               Navigator.pop(context);
             },
-            child: const Text('Peel Off'),
+            child: const Text('Archive'),
           ),
         ],
+      ),
+    );
+  }
+
+  void _showStickyArchiveSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppTheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.75,
+        maxChildSize: 0.95,
+        builder: (context, scrollCtrl) => StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: _stickyNotesStream,
+          builder: (context, snapshot) {
+            if (!snapshot.hasData) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            final archived = snapshot.data!.docs.where((d) {
+              final data = d.data();
+              return data['isArchived'] == true;
+            }).toList();
+
+            return Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 12, bottom: 8),
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: AppTheme.divider,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.archive_rounded, color: AppTheme.primary, size: 22),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Sticky Memory Archive',
+                        style: GoogleFonts.playfairDisplay(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: AppTheme.textDark,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(color: AppTheme.divider),
+                Expanded(
+                  child: archived.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.inventory_2_outlined, size: 48, color: AppTheme.textMuted),
+                              const SizedBox(height: 12),
+                              Text(
+                                'No archived notes yet.',
+                                style: GoogleFonts.dmSans(color: AppTheme.textMuted, fontSize: 14),
+                              ),
+                            ],
+                          ),
+                        )
+                      : GridView.builder(
+                          controller: scrollCtrl,
+                          padding: const EdgeInsets.all(16),
+                          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 2,
+                            crossAxisSpacing: 12,
+                            mainAxisSpacing: 12,
+                            childAspectRatio: 1.0,
+                          ),
+                          itemCount: archived.length,
+                          itemBuilder: (context, index) {
+                            final doc = archived[index];
+                            final id = doc.id;
+                            final text = doc['text'] as String? ?? '';
+                            final colorIdx = doc['colorIndex'] as int? ?? 0;
+                            final author = doc['createdByName'] as String? ?? 'Partner';
+                            final paperColor = _StickyNoteTile._pastels[colorIdx % _StickyNoteTile._pastels.length];
+
+                            return Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: paperColor,
+                                borderRadius: BorderRadius.circular(16),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.03),
+                                    blurRadius: 4,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      text,
+                                      style: GoogleFonts.dmSans(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w500,
+                                        color: AppTheme.textDark,
+                                      ),
+                                      maxLines: 4,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text(
+                                        'From $author',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          color: AppTheme.textMuted,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          GestureDetector(
+                                            onTap: () async {
+                                              HapticFeedback.mediumImpact();
+                                              await _firestore.restoreStickyNote(coupleId, id);
+                                            },
+                                            child: const Icon(
+                                              Icons.unarchive_rounded,
+                                              size: 16,
+                                              color: AppTheme.primary,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          GestureDetector(
+                                            onTap: () {
+                                              HapticFeedback.heavyImpact();
+                                              showDialog(
+                                                context: ctx,
+                                                builder: (_) => AlertDialog(
+                                                  title: const Text('Delete permanently?'),
+                                                  content: const Text('This will erase the sticky note memory forever.'),
+                                                  actions: [
+                                                    TextButton(
+                                                      onPressed: () => Navigator.pop(ctx),
+                                                      child: const Text('Keep it'),
+                                                    ),
+                                                    TextButton(
+                                                      onPressed: () async {
+                                                        Navigator.pop(ctx);
+                                                        await _firestore.permanentlyDeleteStickyNote(coupleId, id);
+                                                      },
+                                                      child: const Text('Delete', style: TextStyle(color: Colors.red)),
+                                                    ),
+                                                  ],
+                                                ),
+                                              );
+                                            },
+                                            child: const Icon(
+                                              Icons.delete_forever_rounded,
+                                              size: 16,
+                                              color: Colors.redAccent,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ],
+            );
+          },
+        ),
       ),
     );
   }
