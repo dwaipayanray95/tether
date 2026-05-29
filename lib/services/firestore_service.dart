@@ -114,6 +114,30 @@ class FirestoreService {
     });
   }
 
+  Future<void> updateTodoMetadata(
+      String coupleId, {
+      required String todoId,
+      String? priority,
+      String? assignedTo,
+      DateTime? dueDate,
+      bool clearDueDate = false,
+  }) async {
+    final Map<String, dynamic> updates = {};
+    updates['priority'] = priority;
+    updates['assignedTo'] = assignedTo;
+    if (clearDueDate) {
+      updates['dueDate'] = null;
+    } else if (dueDate != null) {
+      updates['dueDate'] = dueDate.toIso8601String();
+    }
+    await _db
+        .collection('couples')
+        .doc(coupleId)
+        .collection('todos')
+        .doc(todoId)
+        .update(updates);
+  }
+
   Future<void> deleteTodo(String coupleId, String todoId) {
     return _db
         .collection('couples')
@@ -359,7 +383,31 @@ class FirestoreService {
     });
   }
 
-  Future<void> deleteStickyNote(String coupleId, String noteId) async {
+  Future<void> archiveStickyNote(String coupleId, String noteId) async {
+    await _db
+        .collection('couples')
+        .doc(coupleId)
+        .collection('sticky_notes')
+        .doc(noteId)
+        .update({
+      'isArchived': true,
+      'archivedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Future<void> restoreStickyNote(String coupleId, String noteId) async {
+    await _db
+        .collection('couples')
+        .doc(coupleId)
+        .collection('sticky_notes')
+        .doc(noteId)
+        .update({
+      'isArchived': false,
+      'archivedAt': null,
+    });
+  }
+
+  Future<void> permanentlyDeleteStickyNote(String coupleId, String noteId) async {
     await _db
         .collection('couples')
         .doc(coupleId)

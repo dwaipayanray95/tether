@@ -11,7 +11,7 @@ import '../services/firestore_service.dart';
 import '../services/notification_service.dart';
 import '../services/log_service.dart';
 import '../theme/app_theme.dart';
-
+import 'package:google_fonts/google_fonts.dart';
 class TodoScreen extends StatefulWidget {
   const TodoScreen({super.key});
 
@@ -929,6 +929,51 @@ class _TodoDetailSheetState extends State<_TodoDetailSheet> {
     );
   }
 
+  Future<void> _pickDueDate(TodoItem currentTodo) async {
+    final date = await showDatePicker(
+      context: context,
+      initialDate: currentTodo.dueDate ?? DateTime.now(),
+      firstDate: DateTime.now().subtract(const Duration(days: 1)),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+      builder: (context, child) => Theme(
+        data: Theme.of(context).copyWith(
+          colorScheme: const ColorScheme.light(
+            primary: AppTheme.primary,
+            onPrimary: Colors.white,
+            onSurface: AppTheme.textDark,
+          ),
+        ),
+        child: child!,
+      ),
+    );
+    if (date == null) return;
+
+    if (!mounted) return;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(currentTodo.dueDate ?? DateTime.now()),
+      builder: (context, child) => Theme(
+        data: Theme.of(context).copyWith(
+          colorScheme: const ColorScheme.light(
+            primary: AppTheme.primary,
+            onPrimary: Colors.white,
+            onSurface: AppTheme.textDark,
+          ),
+        ),
+        child: child!,
+      ),
+    );
+    if (time == null) return;
+
+    final newDueDate = DateTime(date.year, date.month, date.day, time.hour, time.minute);
+    HapticFeedback.lightImpact();
+    await widget.firestore.updateTodoMetadata(
+      widget.coupleId,
+      todoId: currentTodo.id,
+      dueDate: newDueDate,
+    );
+  }
+
   Widget _buildChecklistSection(TodoItem todo) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1207,6 +1252,210 @@ class _TodoDetailSheetState extends State<_TodoDetailSheet> {
                           ],
                         ),
                       ),
+              ),
+
+              // Metadata Row (Assignee, Priority, Alarm/Due Date)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(56, 4, 20, 16),
+                child: Column(
+                  children: [
+                    // Assignee row
+                    Row(
+                      children: [
+                        const Icon(Icons.person_rounded, size: 16, color: AppTheme.textMuted),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Assignee:',
+                            style: GoogleFonts.dmSans(fontSize: 13, color: AppTheme.textMuted),
+                          ),
+                        ),
+                        PopupMenuButton<String?>(
+                          initialValue: currentTodo.assignedTo,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: AppTheme.primaryLight,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              currentTodo.assignedTo == null
+                                  ? 'Both'
+                                  : currentTodo.assignedTo == 'ray'
+                                      ? 'Ray'
+                                      : 'Aproo',
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.primary,
+                              ),
+                            ),
+                          ),
+                          onSelected: (val) async {
+                            HapticFeedback.lightImpact();
+                            await widget.firestore.updateTodoMetadata(
+                              widget.coupleId,
+                              todoId: currentTodo.id,
+                              assignedTo: val,
+                            );
+                          },
+                          itemBuilder: (context) => [
+                            const PopupMenuItem(
+                              value: null,
+                              child: Text('Both'),
+                            ),
+                            const PopupMenuItem(
+                              value: 'ray',
+                              child: Text('Ray'),
+                            ),
+                            const PopupMenuItem(
+                              value: 'aproo',
+                              child: Text('Aproo'),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    // Priority row
+                    Row(
+                      children: [
+                        const Icon(Icons.outlined_flag_rounded, size: 16, color: AppTheme.textMuted),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Priority:',
+                            style: GoogleFonts.dmSans(fontSize: 13, color: AppTheme.textMuted),
+                          ),
+                        ),
+                        PopupMenuButton<String?>(
+                          initialValue: currentTodo.priority,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: currentTodo.priority == 'high'
+                                  ? Colors.red.shade50
+                                  : currentTodo.priority == 'medium'
+                                      ? Colors.amber.shade50
+                                      : currentTodo.priority == 'low'
+                                          ? Colors.blue.shade50
+                                          : AppTheme.background,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              currentTodo.priority == null
+                                  ? 'None'
+                                  : currentTodo.priority![0].toUpperCase() + currentTodo.priority!.substring(1),
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: currentTodo.priority == 'high'
+                                    ? Colors.red.shade700
+                                    : currentTodo.priority == 'medium'
+                                        ? Colors.amber.shade800
+                                        : currentTodo.priority == 'low'
+                                            ? Colors.blue.shade700
+                                            : AppTheme.textMuted,
+                              ),
+                            ),
+                          ),
+                          onSelected: (val) async {
+                            HapticFeedback.lightImpact();
+                            await widget.firestore.updateTodoMetadata(
+                              widget.coupleId,
+                              todoId: currentTodo.id,
+                              priority: val,
+                            );
+                          },
+                          itemBuilder: (context) => [
+                            const PopupMenuItem(
+                              value: null,
+                              child: Text('None'),
+                            ),
+                            const PopupMenuItem(
+                              value: 'low',
+                              child: Text('Low'),
+                            ),
+                            const PopupMenuItem(
+                              value: 'medium',
+                              child: Text('Medium'),
+                            ),
+                            const PopupMenuItem(
+                              value: 'high',
+                              child: Text('High'),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    // Alarm / Due Date row
+                    Row(
+                      children: [
+                        const Icon(Icons.alarm_rounded, size: 16, color: AppTheme.textMuted),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Due Alert:',
+                            style: GoogleFonts.dmSans(fontSize: 13, color: AppTheme.textMuted),
+                          ),
+                        ),
+                        if (currentTodo.dueDate != null) ...[
+                          GestureDetector(
+                            onTap: () => _pickDueDate(currentTodo),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.purple.shade50,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                DateFormat('MMM d, h:mm a').format(currentTodo.dueDate!),
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.purple.shade700,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          IconButton(
+                            icon: const Icon(Icons.clear_rounded, size: 16, color: Colors.redAccent),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            onPressed: () async {
+                              HapticFeedback.mediumImpact();
+                              await widget.firestore.updateTodoMetadata(
+                                widget.coupleId,
+                                todoId: currentTodo.id,
+                                clearDueDate: true,
+                              );
+                            },
+                          ),
+                        ] else
+                          GestureDetector(
+                            onTap: () => _pickDueDate(currentTodo),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: AppTheme.background,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Text(
+                                'Set Alert',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppTheme.textMuted,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
 
               const Divider(color: AppTheme.divider, height: 1),
