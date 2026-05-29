@@ -144,9 +144,14 @@ class MainActivity : FlutterActivity() {
                 
                 // Determine playstate
                 var isPlaying = intent.getBooleanExtra("playing", false)
+                if (!intent.hasExtra("playing")) {
+                    isPlaying = intent.getBooleanExtra("isPlaying", false)
+                }
                 val action = intent.action
-                if (action != null && !intent.hasExtra("playing")) {
-                    if (action.contains("playstatechanged")) {
+                if (action != null && !intent.hasExtra("playing") && !intent.hasExtra("isPlaying")) {
+                    if (action.contains("playstatechanged") || action.contains("playbackstatechanged")) {
+                        isPlaying = intent.getBooleanExtra("playing", false) || intent.getBooleanExtra("playstate", false)
+                    } else if (action.contains("metachanged") || action.contains("metadatachanged") || action.contains("playback")) {
                         isPlaying = true
                     }
                 }
@@ -169,10 +174,31 @@ class MainActivity : FlutterActivity() {
             // Apple Music Intents
             addAction("com.apple.android.music.metachanged")
             addAction("com.apple.android.music.playstatechanged")
-            // Standard / Spotify intent fallbacks
+            addAction("com.apple.android.music.playbackstatechanged")
+            addAction("com.apple.android.music.queuechanged")
+
+            // Spotify Intents
+            addAction("com.spotify.music.metadatachanged")
+            addAction("com.spotify.music.playbackstatechanged")
+            addAction("com.spotify.music.queuechanged")
+
+            // YT Music & Google Play Music Intents
+            addAction("com.google.android.music.metachanged")
+            addAction("com.google.android.music.playstatechanged")
+            addAction("com.google.android.music.playbackstatechanged")
+
+            // Standard / Generic Android Music Intents
             addAction("com.android.music.metachanged")
             addAction("com.android.music.playstatechanged")
-            addAction("com.spotify.music.metadatachanged")
+            addAction("com.android.music.playbackstatechanged")
+            addAction("com.android.music.queuechanged")
+
+            // MIUI / local players
+            addAction("com.miui.player.metachanged")
+            addAction("com.miui.player.playstatechanged")
+            addAction("com.htc.music.metachanged")
+            addAction("com.sec.android.app.music.metachanged")
+            addAction("com.sec.android.app.music.playstatechanged")
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
