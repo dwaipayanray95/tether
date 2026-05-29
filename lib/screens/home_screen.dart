@@ -35,6 +35,7 @@ class _HomeScreenState extends State<HomeScreen>
   final _auth = AuthService();
   final _firestore = FirestoreService();
   late AnimationController _pokeController;
+  late AnimationController _pulseController;
   late Animation<double> _pokeScale;
   
   // Poke status
@@ -107,6 +108,10 @@ class _HomeScreenState extends State<HomeScreen>
       vsync: this,
       duration: const Duration(milliseconds: 150),
     );
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    )..repeat(reverse: true);
     _pokeScale = Tween<double>(begin: 1.0, end: 0.88).animate(
       CurvedAnimation(parent: _pokeController, curve: Curves.easeInOut),
     );
@@ -135,6 +140,7 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void dispose() {
     _pokeController.dispose();
+    _pulseController.dispose();
     _partnerLocSub?.cancel();
     _presenceSub?.cancel();
     _pokeSub?.cancel();
@@ -744,34 +750,58 @@ class _HomeScreenState extends State<HomeScreen>
                             ),
                           ],
                           Center(
-                            child: AnimatedRotation(
-                              turns: _turns,
-                              duration: Duration(milliseconds: _proximityActive ? 50 : 300),
-                              curve: Curves.easeOutCubic,
-                              child: Stack(
-                                alignment: Alignment.center,
-                                children: [
-                                  // Subtle background glow arrow
-                                  Opacity(
-                                    opacity: 0.25,
-                                    child: Transform.translate(
-                                      offset: const Offset(0, -1),
-                                      child: Icon(
-                                        Icons.navigation_rounded,
-                                        color: _proximityActive ? const Color(0xFF10B981) : AppTheme.primary,
-                                        size: 46,
-                                      ),
+                            child: (_proximityActive && dist != null && (dist * 1000) < 6)
+                                ? ScaleTransition(
+                                    scale: Tween<double>(begin: 0.95, end: 1.15).animate(
+                                      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+                                    ),
+                                    child: Stack(
+                                      alignment: Alignment.center,
+                                      children: [
+                                        Opacity(
+                                          opacity: 0.25,
+                                          child: Icon(
+                                            Icons.favorite_rounded,
+                                            color: const Color(0xFF10B981),
+                                            size: 46,
+                                          ),
+                                        ),
+                                        Icon(
+                                          Icons.favorite_rounded,
+                                          color: const Color(0xFF10B981),
+                                          size: 36,
+                                        ),
+                                      ],
+                                    ),
+                                  )
+                                : AnimatedRotation(
+                                    turns: _turns,
+                                    duration: Duration(milliseconds: _proximityActive ? 50 : 300),
+                                    curve: Curves.easeOutCubic,
+                                    child: Stack(
+                                      alignment: Alignment.center,
+                                      children: [
+                                        // Subtle background glow arrow
+                                        Opacity(
+                                          opacity: 0.25,
+                                          child: Transform.translate(
+                                            offset: const Offset(0, -1),
+                                            child: Icon(
+                                              Icons.navigation_rounded,
+                                              color: _proximityActive ? const Color(0xFF10B981) : AppTheme.primary,
+                                              size: 46,
+                                            ),
+                                          ),
+                                        ),
+                                        // Primary arrow
+                                        Icon(
+                                          Icons.navigation_rounded,
+                                          color: _proximityActive ? const Color(0xFF10B981) : AppTheme.primary,
+                                          size: 36,
+                                        ),
+                                      ],
                                     ),
                                   ),
-                                  // Primary arrow
-                                  Icon(
-                                    Icons.navigation_rounded,
-                                    color: _proximityActive ? const Color(0xFF10B981) : AppTheme.primary,
-                                    size: 36,
-                                  ),
-                                ],
-                              ),
-                            ),
                           ),
                         ],
                       ),
