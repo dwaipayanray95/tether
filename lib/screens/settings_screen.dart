@@ -57,7 +57,7 @@ class SettingsScreen extends StatelessWidget {
           _buildTile(
             icon: Icons.logout_rounded,
             title: 'Sign out',
-            subtitle: 'Logged in as ${auth.myName}',
+            subtitle: 'Logged in as ${auth.myDisplayName}',
             textColor: Colors.redAccent,
             onTap: () => _showSignOutDialog(context, auth),
           ),
@@ -144,7 +144,7 @@ class SettingsScreen extends StatelessWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Sign out?'),
-        content: Text('Signing out as ${auth.myName}'),
+        content: Text('Signing out as ${auth.myDisplayName}'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
