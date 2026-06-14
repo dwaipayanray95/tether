@@ -107,7 +107,7 @@ class _LocationScreenState extends State<LocationScreen> {
       markers.add(Marker(
         markerId: const MarkerId('me'),
         position: _myPosition!,
-        infoWindow: InfoWindow(title: _auth.myName, snippet: 'You'),
+        infoWindow: InfoWindow(title: _auth.myDisplayName, snippet: 'You'),
         icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRose),
       ));
     }
@@ -115,7 +115,7 @@ class _LocationScreenState extends State<LocationScreen> {
       markers.add(Marker(
         markerId: const MarkerId('partner'),
         position: _partnerPosition!,
-        infoWindow: InfoWindow(title: _auth.partnerName),
+        infoWindow: InfoWindow(title: _auth.partnerDisplayName),
         icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueViolet),
       ));
     }
@@ -248,14 +248,14 @@ class _LocationScreenState extends State<LocationScreen> {
                     Row(
                       children: [
                         _locationChip(
-                          name: _auth.partnerName,
+                          name: _auth.partnerDisplayName,
                           updatedAt: _partnerUpdatedAt,
                           color: AppTheme.secondary,
                           hasLocation: _partnerPosition != null,
                         ),
                         const SizedBox(width: 12),
                         _locationChip(
-                          name: _auth.myName,
+                          name: _auth.myDisplayName,
                           updatedAt: _myUpdatedAt,
                           color: AppTheme.primary,
                           hasLocation: _myPosition != null,

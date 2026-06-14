@@ -553,7 +553,7 @@ class ChatScreenState extends State<ChatScreen> {
                             size: 14, color: AppTheme.primary),
                         const SizedBox(width: 6),
                         Text(
-                          'Replying to ${_replyTo!.senderId == _myUid ? "yourself" : _auth.partnerName}',
+                          'Replying to ${_replyTo!.senderId == _myUid ? "yourself" : _auth.partnerDisplayName}',
                           style: const TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.bold,

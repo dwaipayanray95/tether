@@ -24,6 +24,8 @@ class AuthService {
 
   String get myName => isRay ? 'Ray' : 'Aproo';
   String get partnerName => isRay ? 'Aproo' : 'Ray';
+  String get myDisplayName => myName == 'Ray' ? 'Raayyy' : myName;
+  String get partnerDisplayName => partnerName == 'Ray' ? 'Raayyy' : partnerName;
 
   Future<String?> getPartnerUid() async {
     final partnerEmail = isRay ? allowedEmails[1] : allowedEmails[0];

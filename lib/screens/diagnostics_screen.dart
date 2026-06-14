@@ -164,7 +164,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
     );
     final res = await FcmService.send(
       partnerName: partnerName,
-      title: '💖 Connection Test from ${auth.myName}',
+      title: '💖 Connection Test from ${auth.myDisplayName}',
       body: 'Our direct connection is perfectly up and running!',
     );
     if (mounted) Navigator.pop(context); // dismiss loader

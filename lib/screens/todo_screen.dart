@@ -128,13 +128,19 @@ class _TodoScreenState extends State<TodoScreen> {
                   Row(
                     children: [
                       _buildChipOption(
-                        label: 'Both',
+                        label: 'Unassigned',
                         selected: selectedAssignedTo == null,
                         onTap: () => setState(() => selectedAssignedTo = null),
                       ),
                       const SizedBox(width: 8),
                       _buildChipOption(
-                        label: 'Ray',
+                        label: 'Both',
+                        selected: selectedAssignedTo == 'both',
+                        onTap: () => setState(() => selectedAssignedTo = 'both'),
+                      ),
+                      const SizedBox(width: 8),
+                      _buildChipOption(
+                        label: 'Raayyy',
                         selected: selectedAssignedTo == 'ray',
                         onTap: () => setState(() => selectedAssignedTo = 'ray'),
                       ),
@@ -614,8 +620,13 @@ class _TodoTile extends StatelessWidget {
     );
   }
 
-  Widget _buildAssigneeIndicator(String assignedTo) {
-    final label = assignedTo == 'ray' ? 'Ray' : 'Aproo';
+  Widget _buildAssigneeIndicator(String? assignedTo) {
+    if (assignedTo == null) {
+      return const SizedBox.shrink();
+    }
+    final label = assignedTo == 'both'
+        ? 'Both'
+        : (assignedTo == 'ray' ? 'Raayyy' : 'Aproo');
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
@@ -775,12 +786,7 @@ class _TodoTile extends StatelessWidget {
                 fontWeight: FontWeight.w500,
               ),
             ),
-            subtitle: (todo.details != null && todo.details!.isNotEmpty) ||
-                    todo.dueDate != null ||
-                    todo.priority != null ||
-                    todo.assignedTo != null ||
-                    todo.checklist.isNotEmpty
-                ? Padding(
+            subtitle: Padding(
                     padding: const EdgeInsets.only(top: 4),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -803,16 +809,14 @@ class _TodoTile extends StatelessWidget {
                               _buildPriorityIndicator(todo.priority!),
                             if (todo.dueDate != null)
                               _buildDueDateIndicator(todo.dueDate!, todo.isDone),
-                            if (todo.assignedTo != null)
-                              _buildAssigneeIndicator(todo.assignedTo!),
+                            _buildAssigneeIndicator(todo.assignedTo),
                             if (todo.checklist.isNotEmpty)
                               _buildChecklistProgress(todo.checklist),
                           ],
                         ),
                       ],
                     ),
-                  )
-                : null,
+                  ),
             trailing: StreamBuilder<List<TodoComment>>(
               stream: firestore.commentStream(coupleId, todo.id),
               builder: (context, snap) {
@@ -1280,10 +1284,12 @@ class _TodoDetailSheetState extends State<_TodoDetailSheet> {
                             ),
                             child: Text(
                               currentTodo.assignedTo == null
-                                  ? 'Both'
-                                  : currentTodo.assignedTo == 'ray'
-                                      ? 'Ray'
-                                      : 'Aproo',
+                                  ? 'Unassigned'
+                                  : currentTodo.assignedTo == 'both'
+                                      ? 'Both'
+                                      : currentTodo.assignedTo == 'ray'
+                                          ? 'Raayyy'
+                                          : 'Aproo',
                               style: const TextStyle(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w600,
@@ -1302,11 +1308,15 @@ class _TodoDetailSheetState extends State<_TodoDetailSheet> {
                           itemBuilder: (context) => [
                             const PopupMenuItem(
                               value: null,
+                              child: Text('Unassigned'),
+                            ),
+                            const PopupMenuItem(
+                              value: 'both',
                               child: Text('Both'),
                             ),
                             const PopupMenuItem(
                               value: 'ray',
-                              child: Text('Ray'),
+                              child: Text('Raayyy'),
                             ),
                             const PopupMenuItem(
                               value: 'aproo',

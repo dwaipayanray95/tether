@@ -149,6 +149,20 @@ class FcmService {
             if (!isDataOnly)
               'notification': {
                 'channel_id': type == 'call_ping' ? 'tether_calls_v1' : 'tether_updates_v1',
+                'notification_priority': 'PRIORITY_MAX',
+                'default_sound': true,
+                'default_vibrate_timings': true,
+              },
+          },
+          'apns': {
+            'headers': {
+              'apns-priority': '10',
+            },
+            if (!isDataOnly)
+              'payload': {
+                'aps': {
+                  'sound': 'default',
+                },
               },
           },
         }
