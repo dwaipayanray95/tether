@@ -13,6 +13,10 @@ val keyProperties = Properties()
 if (keyPropertiesFile.exists()) {
     keyProperties.load(FileInputStream(keyPropertiesFile))
 }
+val hasKeyProperties = keyProperties.containsKey("keyAlias") &&
+                       keyProperties.containsKey("keyPassword") &&
+                       keyProperties.containsKey("storeFile") &&
+                       keyProperties.containsKey("storePassword")
 
 android {
     namespace = "com.theawesomeray.tether"
@@ -31,10 +35,12 @@ android {
 
     signingConfigs {
         create("release") {
-            keyAlias = keyProperties["keyAlias"] as String
-            keyPassword = keyProperties["keyPassword"] as String
-            storeFile = file(keyProperties["storeFile"] as String)
-            storePassword = keyProperties["storePassword"] as String
+            if (hasKeyProperties) {
+                keyAlias = keyProperties["keyAlias"] as String
+                keyPassword = keyProperties["keyPassword"] as String
+                storeFile = file(keyProperties["storeFile"] as String)
+                storePassword = keyProperties["storePassword"] as String
+            }
         }
     }
 
@@ -48,7 +54,11 @@ android {
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
+            if (hasKeyProperties) {
+                signingConfig = signingConfigs.getByName("release")
+            } else {
+                signingConfig = signingConfigs.getByName("debug")
+            }
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
