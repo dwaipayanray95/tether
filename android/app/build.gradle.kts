@@ -40,6 +40,8 @@ android {
                 keyPassword = keyProperties["keyPassword"] as String
                 storeFile = file(keyProperties["storeFile"] as String)
                 storePassword = keyProperties["storePassword"] as String
+            } else {
+                throw org.gradle.api.GradleException("key.properties configuration is missing! Tether release builds must be signed.")
             }
         }
     }
@@ -54,11 +56,7 @@ android {
 
     buildTypes {
         release {
-            if (hasKeyProperties) {
-                signingConfig = signingConfigs.getByName("release")
-            } else {
-                signingConfig = signingConfigs.getByName("debug")
-            }
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
