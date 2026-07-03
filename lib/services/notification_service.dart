@@ -8,8 +8,6 @@ import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 import '../models/todo_model.dart';
 import 'nav_service.dart';
-import 'location_service.dart';
-import 'auth_service.dart';
 import 'log_service.dart';
 
 // ── Background handler (runs in a separate isolate) ───────────────────────────
@@ -22,12 +20,7 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   final type = message.data['type'] as String? ?? '';
 
   if (type == 'ping') {
-    final auth = AuthService();
-    final myKey = auth.isRay ? 'ray' : 'aproo';
-    final pos = await LocationService.getCurrentPosition();
-    if (pos != null) {
-      await LocationService.forceUpload(pos, myKey, auth.myName);
-    }
+    // Location pings removed
     return;
   }
 
@@ -108,12 +101,7 @@ class NotificationService {
       final type = message.data['type'] as String? ?? '';
 
       if (type == 'ping') {
-        final auth = AuthService();
-        final myKey = auth.isRay ? 'ray' : 'aproo';
-        final pos = await LocationService.getCurrentPosition();
-        if (pos != null) {
-          await LocationService.forceUpload(pos, myKey, auth.myName);
-        }
+        // Location pings removed
         return;
       }
 

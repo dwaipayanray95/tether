@@ -31,11 +31,12 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   String get _myUid => FirebaseAuth.instance.currentUser?.uid ?? '';
   String get _myPresenceKey => _auth.isRay ? 'ray' : 'aproo';
 
-  /// Tracks the last time we pinged GitHub for an update.
   DateTime? _lastUpdateCheck;
 
   static const _batteryChannel = MethodChannel('com.theawesomeray.tether/battery');
   Timer? _batteryTimer;
+  int? _lastBatteryLevel;
+  bool? _lastIsCharging;
 
   void _goToTab(int index) {
     LogService.log('Navigating to tab: $index');
@@ -66,6 +67,11 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         final level = info['batteryLevel'] as int? ?? -1;
         final isCharging = info['isCharging'] as bool? ?? false;
         if (level >= 0) {
+          if (level == _lastBatteryLevel && isCharging == _lastIsCharging) {
+            return; // Skip duplicate write!
+          }
+          _lastBatteryLevel = level;
+          _lastIsCharging = isCharging;
           await _firestore.updateBatteryPresence(_myPresenceKey, level, isCharging);
         }
       }
