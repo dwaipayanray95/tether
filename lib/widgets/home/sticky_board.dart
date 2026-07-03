@@ -476,7 +476,7 @@ class StickyBoardState extends State<StickyBoard> {
         maxChildSize: 0.95,
         builder: (context, scrollCtrl) =>
             StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-          stream: _stream,
+          stream: _firestore.stickyNotesStream(coupleId),
           builder: (context, snapshot) {
             if (snapshot.hasError) {
               return Center(
