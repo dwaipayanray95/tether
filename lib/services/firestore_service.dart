@@ -430,4 +430,28 @@ class FirestoreService {
         .doc(coupleId)
         .set(data, SetOptions(merge: true));
   }
+
+  // ── Snaps ─────────────────────────────────────────────────────────────────
+
+  Stream<DocumentSnapshot<Map<String, dynamic>>> snapsStream(String coupleId) {
+    return _db
+        .collection('couples')
+        .doc(coupleId)
+        .collection('snaps')
+        .doc('current')
+        .snapshots();
+  }
+
+  Future<void> sendSnap(String coupleId, String senderKey, String base64String) async {
+    LogService.log('Sending new snap from $senderKey');
+    await _db
+        .collection('couples')
+        .doc(coupleId)
+        .collection('snaps')
+        .doc('current')
+        .set({
+      '${senderKey}LatestBase64': base64String,
+      '${senderKey}SentAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
 }

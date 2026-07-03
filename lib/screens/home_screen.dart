@@ -6,7 +6,7 @@ import 'package:timeago/timeago.dart' as timeago;
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
 import '../theme/app_theme.dart';
-import '../widgets/home/compass_card.dart';
+import '../widgets/home/quick_snap.dart';
 import '../widgets/home/music_card.dart';
 import '../widgets/home/poke_card.dart';
 import '../widgets/home/quick_actions.dart';
@@ -32,10 +32,11 @@ class _HomeScreenState extends State<HomeScreen> {
   final _auth = AuthService();
   final _firestore = FirestoreService();
 
-  // Only the header still needs presence for the online dot + last-seen text.
+  // Only the header still needs presence for the online dot + last-seen text + battery level.
   // Everything else is owned by its own card widget.
   Timestamp? _rayLastSeen;
   Timestamp? _aprooLastSeen;
+  Map<String, dynamic>? _partnerBattery;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _presenceSub;
 
   // Key to call showArchiveSheet() on the StickyBoard
@@ -53,6 +54,11 @@ class _HomeScreenState extends State<HomeScreen> {
           final a = data['aproo'] as Map<String, dynamic>?;
           _rayLastSeen = r?['lastSeen'] as Timestamp?;
           _aprooLastSeen = a?['lastSeen'] as Timestamp?;
+
+          final partnerPresence = _auth.isRay ? a : r;
+          _partnerBattery = partnerPresence?['battery'] != null
+              ? Map<String, dynamic>.from(partnerPresence!['battery'] as Map)
+              : null;
         });
       }
     });
@@ -110,17 +116,24 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
                 const SizedBox(width: 6),
-                Text(
-                  partnerOnline
-                      ? '$partnerName is active now'
-                      : (partnerLastSeen == null
-                          ? '$partnerName is offline'
-                          : '$partnerName was active ${timeago.format(partnerLastSeen.toDate(), locale: 'en_short')}'),
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    color: AppTheme.textMuted,
-                  ),
+                Builder(
+                  builder: (context) {
+                    final batteryText = _partnerBattery != null
+                        ? '  ·  🔋 ${_partnerBattery!['level']}%${_partnerBattery!['isCharging'] == true ? ' ⚡' : ''}'
+                        : '';
+                    return Text(
+                      partnerOnline
+                          ? '$partnerName is active now$batteryText'
+                          : (partnerLastSeen == null
+                              ? '$partnerName is offline$batteryText'
+                              : '$partnerName was active ${timeago.format(partnerLastSeen.toDate(), locale: 'en_short')}$batteryText'),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: AppTheme.textMuted,
+                      ),
+                    );
+                  },
                 ),
               ],
             ),
@@ -213,7 +226,7 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               _buildHeader(),
               const SizedBox(height: 14),
-              const CompassCard(),
+              const QuickSnap(),
               const SizedBox(height: 18),
               _buildStickyHeader(),
               const SizedBox(height: 10),

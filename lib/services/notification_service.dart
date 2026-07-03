@@ -164,6 +164,8 @@ class NotificationService {
 
       if (type == 'chat') {
         pendingTab = 1;
+      } else if (type == 'snap') {
+        pendingTab = 0;
       }
     } catch (e) {
       LogService.log('Error parsing notification payload: $e');
