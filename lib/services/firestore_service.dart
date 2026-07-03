@@ -442,7 +442,7 @@ class FirestoreService {
         .snapshots();
   }
 
-  Future<void> sendSnap(String coupleId, String senderKey, String base64String) async {
+  Future<void> sendSnap(String coupleId, String senderKey, String base64Photo, String caption) async {
     LogService.log('Sending new snap from $senderKey');
     await _db
         .collection('couples')
@@ -450,7 +450,8 @@ class FirestoreService {
         .collection('snaps')
         .doc('current')
         .set({
-      '${senderKey}LatestBase64': base64String,
+      '${senderKey}LatestPhoto': base64Photo,
+      '${senderKey}Caption': caption,
       '${senderKey}SentAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
   }

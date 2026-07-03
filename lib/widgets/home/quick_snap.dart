@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' as ui;
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:intl/intl.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -41,51 +43,123 @@ class _QuickSnapState extends State<QuickSnap> {
     try {
       final pickedFile = await _picker.pickImage(
         source: source,
-        maxWidth: 1080,
-        maxHeight: 1080,
+        maxWidth: 800,
+        maxHeight: 800,
         imageQuality: 70,
       );
 
       if (pickedFile == null) return;
-
-      setState(() => _isUploading = true);
-      HapticFeedback.mediumImpact();
-
-      final bytes = await File(pickedFile.path).readAsBytes();
-      final base64String = base64Encode(bytes);
-
-      final myKey = _auth.myName.toLowerCase(); // 'ray' or 'aproo'
-      await _firestore.sendSnap(coupleId, myKey, base64String);
-
-      // Trigger high priority FCM push notification to partner
-      final partnerName = _auth.partnerName.toLowerCase();
-      await FcmService.send(
-        partnerName: partnerName,
-        title: '📷 New Quick Snap!',
-        body: '${_auth.myDisplayName} sent you a live photo. Open Tether to view!',
-        type: 'snap',
-      );
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Snap sent successfully! 📸'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
+      _showCaptionDialog(File(pickedFile.path));
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to upload snap: $e'),
+            content: Text('Failed to pick photo: $e'),
             backgroundColor: Colors.redAccent,
           ),
         );
       }
-    } finally {
-      if (mounted) setState(() => _isUploading = false);
     }
+  }
+
+  void _showCaptionDialog(File imageFile) {
+    final captionCtrl = TextEditingController();
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        backgroundColor: AppTheme.surface,
+        title: Text(
+          'Add a Caption',
+          style: GoogleFonts.dmSans(
+            fontWeight: FontWeight.bold,
+            color: AppTheme.textDark,
+          ),
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: Image.file(
+                  imageFile,
+                  height: 200,
+                  width: 200,
+                  fit: BoxFit.cover,
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: captionCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Caption (Cursive)',
+                  hintText: 'e.g. Thinking of you!',
+                ),
+                textCapitalization: TextCapitalization.sentences,
+                maxLength: 40,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx),
+            child: const Text('Cancel', style: TextStyle(color: AppTheme.textMuted)),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final caption = captionCtrl.text.trim();
+              Navigator.pop(dialogCtx); // close dialog
+              
+              setState(() => _isUploading = true);
+              HapticFeedback.mediumImpact();
+              
+              try {
+                final originalBytes = await imageFile.readAsBytes();
+                final base64Photo = base64Encode(originalBytes);
+                
+                final myKey = _auth.myName.toLowerCase(); // 'ray' or 'aproo'
+                await _firestore.sendSnap(coupleId, myKey, base64Photo, caption);
+
+                // Trigger high priority FCM push notification to partner
+                final partnerName = _auth.partnerName.toLowerCase();
+                await FcmService.send(
+                  partnerName: partnerName,
+                  title: '📷 New Polaroid Snap!',
+                  body: '${_auth.myDisplayName} sent you a Polaroid. Open Tether to view!',
+                  type: 'snap',
+                );
+
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Polaroid sent successfully! 📸'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Failed to send Polaroid: $e'),
+                      backgroundColor: Colors.redAccent,
+                    ),
+                  );
+                }
+              } finally {
+                if (mounted) {
+                  setState(() => _isUploading = false);
+                }
+              }
+            },
+            child: const Text('Send Polaroid'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showImageSourceSelector() {
@@ -169,9 +243,103 @@ class _QuickSnapState extends State<QuickSnap> {
     );
   }
 
+  // ── Polaroid Image Generation (On-Demand for Downloads) ─────────────────────
+
+  Future<ui.Image> _loadImage(Uint8List bytes) async {
+    final Completer<ui.Image> completer = Completer();
+    ui.decodeImageFromList(bytes, (ui.Image img) {
+      return completer.complete(img);
+    });
+    return completer.future;
+  }
+
+  Future<Uint8List> _renderPolaroidPNG(Uint8List imageBytes, String caption, DateTime date) async {
+    final originalImage = await _loadImage(imageBytes);
+
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+
+    // 1. Draw solid white polaroid background (1080x1350)
+    final framePaint = Paint()..color = Colors.white;
+    canvas.drawRect(const Rect.fromLTWH(0, 0, 1080, 1350), framePaint);
+
+    // 2. Draw photo cropped into square of 960x960 at (60, 60)
+    final srcWidth = originalImage.width;
+    final srcHeight = originalImage.height;
+    double srcX = 0;
+    double srcY = 0;
+    double side = 0;
+
+    if (srcWidth > srcHeight) {
+      side = srcHeight.toDouble();
+      srcX = (srcWidth - side) / 2;
+    } else {
+      side = srcWidth.toDouble();
+      srcY = (srcHeight - side) / 2;
+    }
+
+    canvas.drawImageRect(
+      originalImage,
+      Rect.fromLTWH(srcX, srcY, side, side),
+      const Rect.fromLTWH(60, 60, 960, 960),
+      Paint(),
+    );
+
+    // 3. Draw inner border around photo
+    final borderPaint = Paint()
+      ..color = Colors.black.withValues(alpha: 0.08)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
+    canvas.drawRect(const Rect.fromLTWH(60, 60, 960, 960), borderPaint);
+
+    // 4. Draw Date/Time handwritten stamp on bottom-right of photo
+    final dateString = DateFormat('MMM d, y · h:mm a').format(date);
+    final dateStyle = GoogleFonts.caveat(
+      color: Colors.black.withValues(alpha: 0.65),
+      fontSize: 34,
+      fontWeight: FontWeight.w600,
+    );
+    final dateSpan = TextSpan(text: dateString, style: dateStyle);
+    final datePainter = TextPainter(
+      text: dateSpan,
+      textDirection: ui.TextDirection.ltr,
+    );
+    datePainter.layout();
+    datePainter.paint(
+      canvas,
+      Offset(1080 - 60 - datePainter.width - 15, 1020 - datePainter.height - 10),
+    );
+
+    // 5. Draw Cursive caption at the bottom
+    if (caption.isNotEmpty) {
+      final captionStyle = GoogleFonts.caveat(
+        color: const Color(0xFF2D2D2D),
+        fontSize: 56,
+        fontWeight: FontWeight.w600,
+      );
+      final captionSpan = TextSpan(text: caption, style: captionStyle);
+      final captionPainter = TextPainter(
+        text: captionSpan,
+        textDirection: ui.TextDirection.ltr,
+        textAlign: TextAlign.center,
+      );
+      captionPainter.layout(maxWidth: 960);
+      
+      final cx = (1080 - captionPainter.width) / 2;
+      final cy = 1080 + (270 - captionPainter.height) / 2;
+      captionPainter.paint(canvas, Offset(cx, cy));
+    }
+
+    // 6. Export
+    final picture = recorder.endRecording();
+    final img = await picture.toImage(1080, 1350);
+    final byteData = await img.toByteData(format: ui.ImageByteFormat.png);
+    return byteData!.buffer.asUint8List();
+  }
+
   // ── Immersive Full-Screen Viewer ───────────────────────────────────────────
 
-  void _showFullScreenViewer(Uint8List imageBytes, String title) {
+  void _showFullScreenViewer(Uint8List imageBytes, String caption, DateTime date, String title) {
     showGeneralDialog(
       context: context,
       barrierDismissible: true,
@@ -193,11 +361,13 @@ class _QuickSnapState extends State<QuickSnap> {
               onPressed: () async {
                 HapticFeedback.lightImpact();
                 try {
+                  // Render the full polaroid in memory dynamically on-demand!
+                  final polaroidBytes = await _renderPolaroidPNG(imageBytes, caption, date);
+                  
                   final tempDir = await getTemporaryDirectory();
-                  final file = File('${tempDir.path}/tether_snap_${DateTime.now().millisecondsSinceEpoch}.jpg');
-                  await file.writeAsBytes(imageBytes);
+                  final file = File('${tempDir.path}/tether_polaroid_${DateTime.now().millisecondsSinceEpoch}.png');
+                  await file.writeAsBytes(polaroidBytes);
 
-                  // Open the file inside the system viewer so the user can easily save it or share it
                   final result = await OpenFile.open(file.path);
                   if (result.type != ResultType.done && ctx.mounted) {
                     ScaffoldMessenger.of(ctx).showSnackBar(
@@ -211,7 +381,7 @@ class _QuickSnapState extends State<QuickSnap> {
                   if (ctx.mounted) {
                     ScaffoldMessenger.of(ctx).showSnackBar(
                       SnackBar(
-                        content: Text('Error saving snap: $e'),
+                        content: Text('Error rendering polaroid: $e'),
                         backgroundColor: Colors.redAccent,
                       ),
                     );
@@ -226,11 +396,77 @@ class _QuickSnapState extends State<QuickSnap> {
           child: InteractiveViewer(
             minScale: 0.5,
             maxScale: 3.5,
-            child: Image.memory(
-              imageBytes,
-              fit: BoxFit.contain,
-              width: double.infinity,
-              height: double.infinity,
+            child: AspectRatio(
+              aspectRatio: 1080 / 1350,
+              child: Container(
+                margin: const EdgeInsets.symmetric(horizontal: 24),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(8),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.3),
+                      blurRadius: 20,
+                    ),
+                  ],
+                ),
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  children: [
+                    Expanded(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: Stack(
+                          children: [
+                            Positioned.fill(
+                              child: Image.memory(
+                                imageBytes,
+                                fit: BoxFit.cover,
+                              ),
+                            ),
+                            Positioned(
+                              bottom: 8,
+                              right: 8,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: Colors.black54,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  DateFormat('MMM d, y · h:mm a').format(date),
+                                  style: GoogleFonts.caveat(
+                                    color: Colors.white70,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      height: 80,
+                      child: Center(
+                        child: Text(
+                          caption,
+                          style: GoogleFonts.caveat(
+                            color: const Color(0xFF2D2D2D),
+                            fontSize: 32,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          textAlign: TextAlign.center,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
         ),
@@ -255,7 +491,6 @@ class _QuickSnapState extends State<QuickSnap> {
             decoration: BoxDecoration(
               color: AppTheme.surface,
               borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: Colors.redAccent.withValues(alpha: 0.2)),
             ),
             child: Center(
               child: Text(
@@ -267,13 +502,14 @@ class _QuickSnapState extends State<QuickSnap> {
         }
 
         final data = snapshot.data?.data();
-        final partnerSnapBase64 = data?['${partnerKey}LatestBase64'] as String?;
+        final partnerPhotoBase64 = data?['${partnerKey}LatestPhoto'] as String?;
+        final partnerCaption = data?['${partnerKey}Caption'] as String? ?? '';
         final partnerSentAt = data?['${partnerKey}SentAt'] as Timestamp?;
 
         Uint8List? partnerImageBytes;
-        if (partnerSnapBase64 != null) {
+        if (partnerPhotoBase64 != null) {
           try {
-            partnerImageBytes = base64Decode(partnerSnapBase64);
+            partnerImageBytes = base64Decode(partnerPhotoBase64);
           } catch (_) {}
         }
 
@@ -281,39 +517,64 @@ class _QuickSnapState extends State<QuickSnap> {
           width: double.infinity,
           height: 180,
           decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [Color(0xFF1E1716), Color(0xFF261D1C)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
+            color: partnerImageBytes != null ? Colors.white : const Color(0xFF1E1716),
             borderRadius: BorderRadius.circular(24),
-            border: Border.all(
-              color: const Color(0xFFE8715A).withValues(alpha: 0.15),
-              width: 1.5,
-            ),
             boxShadow: [
               BoxShadow(
-                color: const Color(0xFFE8715A).withValues(alpha: 0.08),
-                blurRadius: 20,
-                offset: const Offset(0, 10),
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 15,
+                offset: const Offset(0, 5),
               )
             ],
           ),
           child: ClipRRect(
-            borderRadius: BorderRadius.circular(22),
+            borderRadius: BorderRadius.circular(24),
             child: Stack(
               children: [
-                // Display Partner Snap Image
-                if (partnerImageBytes != null)
+                if (partnerImageBytes != null && partnerSentAt != null)
                   Positioned.fill(
                     child: GestureDetector(
                       onTap: () => _showFullScreenViewer(
                         partnerImageBytes!,
+                        partnerCaption,
+                        partnerSentAt.toDate(),
                         'Snap from $partnerName',
                       ),
-                      child: Image.memory(
-                        partnerImageBytes,
-                        fit: BoxFit.cover,
+                      child: Padding(
+                        padding: const EdgeInsets.only(left: 12, top: 12, right: 12, bottom: 44),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: Stack(
+                            children: [
+                              Positioned.fill(
+                                child: Image.memory(
+                                  partnerImageBytes,
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+                              // Live handwritten timestamp stamp on home screen card image
+                              Positioned(
+                                bottom: 8,
+                                right: 8,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black45,
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    '${timeago.format(partnerSentAt.toDate(), locale: 'en_short')} ago',
+                                    style: GoogleFonts.caveat(
+                                      color: Colors.white,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
                   )
@@ -338,33 +599,24 @@ class _QuickSnapState extends State<QuickSnap> {
                     ),
                   ),
 
-                // Top Info Overlay (Timestamp)
-                if (partnerImageBytes != null && partnerSentAt != null)
+                // Polaroid caption text drawn live using text widgets at the bottom row of homescreen card
+                if (partnerImageBytes != null)
                   Positioned(
-                    top: 12,
-                    left: 12,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.black54,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.access_time_rounded,
-                              color: Colors.white70, size: 12),
-                          const SizedBox(width: 4),
-                          Text(
-                            '$partnerName sent ${timeago.format(partnerSentAt.toDate(), locale: 'en_short')}',
-                            style: GoogleFonts.dmSans(
-                              color: Colors.white70,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
+                    bottom: 0,
+                    left: 16,
+                    right: 64, // Leave space for camera FAB
+                    height: 44,
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        partnerCaption.isNotEmpty ? partnerCaption : 'A live photo...',
+                        style: GoogleFonts.caveat(
+                          color: const Color(0xFF2D2D2D),
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                   ),
@@ -384,15 +636,15 @@ class _QuickSnapState extends State<QuickSnap> {
 
                 // Bottom Right Actions (Send Snap Button)
                 Positioned(
-                  bottom: 12,
-                  right: 12,
+                  bottom: 8,
+                  right: 8,
                   child: FloatingActionButton.small(
                     onPressed: _isUploading ? null : _showImageSourceSelector,
                     backgroundColor: AppTheme.primary,
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16)),
-                    child: const Icon(Icons.camera_alt_rounded, size: 20),
+                        borderRadius: BorderRadius.circular(14)),
+                    child: const Icon(Icons.camera_alt_rounded, size: 18),
                   ),
                 ),
               ],
