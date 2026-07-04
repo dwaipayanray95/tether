@@ -332,12 +332,18 @@ class _QuickSnapState extends State<QuickSnap> {
       ..strokeWidth = 2;
     canvas.drawRect(const Rect.fromLTWH(60, 60, 960, 960), borderPaint);
 
-    // 4. Draw Date/Time handwritten stamp on bottom-right of photo
-    final dateString = DateFormat('MMM d, y · h:mm a').format(date);
-    final dateStyle = GoogleFonts.caveat(
-      color: Colors.black.withValues(alpha: 0.65),
-      fontSize: 34,
-      fontWeight: FontWeight.w600,
+    // 4. Draw Date/Time digital LCD stamp on bottom-right of photo
+    final dateString = DateFormat("yy  M  d   HH:mm").format(date);
+    final dateStyle = GoogleFonts.orbitron(
+      color: const Color(0xFFFF5A00), // Glowing retro camera orange
+      fontSize: 28,
+      fontWeight: FontWeight.bold,
+      shadows: [
+        const Shadow(
+          color: Color(0xFFFF5A00),
+          blurRadius: 5,
+        ),
+      ],
     );
     final dateSpan = TextSpan(text: dateString, style: dateStyle);
     final datePainter = TextPainter(
@@ -347,7 +353,7 @@ class _QuickSnapState extends State<QuickSnap> {
     datePainter.layout();
     datePainter.paint(
       canvas,
-      Offset(1080 - 60 - datePainter.width - 15, 1020 - datePainter.height - 10),
+      Offset(1080 - 60 - datePainter.width - 25, 1020 - datePainter.height - 25),
     );
 
     // 5. Draw Cursive caption at the bottom
@@ -467,19 +473,18 @@ class _QuickSnapState extends State<QuickSnap> {
                             Positioned(
                               bottom: 8,
                               right: 8,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                decoration: BoxDecoration(
-                                  color: Colors.black54,
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Text(
-                                  DateFormat('MMM d, y · h:mm a').format(date),
-                                  style: GoogleFonts.caveat(
-                                    color: Colors.white70,
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w600,
-                                  ),
+                              child: Text(
+                                DateFormat('yy  M  d   HH:mm').format(date),
+                                style: GoogleFonts.vt323(
+                                  color: const Color(0xFFFF5A00),
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.bold,
+                                  shadows: [
+                                    Shadow(
+                                      color: const Color(0xFFFF5A00).withValues(alpha: 0.8),
+                                      blurRadius: 4,
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
@@ -602,13 +607,18 @@ class _QuickSnapState extends State<QuickSnap> {
                                     color: Colors.black45,
                                     borderRadius: BorderRadius.circular(8),
                                   ),
-                                  child: Text(
-                                    '${timeago.format(partnerSentAt.toDate(), locale: 'en_short')} ago',
-                                    style: GoogleFonts.caveat(
-                                      color: Colors.white,
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.bold,
-                                    ),
+                                  child: Builder(
+                                    builder: (context) {
+                                      final timeAgoStr = timeago.format(partnerSentAt.toDate(), locale: 'en_short');
+                                      return Text(
+                                        timeAgoStr == 'now' ? 'now' : '$timeAgoStr ago',
+                                        style: GoogleFonts.dmSans(
+                                          color: Colors.white,
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      );
+                                    }
                                   ),
                                 ),
                               ),

@@ -133,14 +133,15 @@ class GoogleDriveService {
 
   Future<void> backupPreferences(Map<String, dynamic> prefs) async {
     try {
-      LogService.log('Google Drive: Backing up user preferences');
+      LogService.log('Google Drive: Backing up user preferences to Tether/tether_preferences.json');
       final token = await _getAccessToken();
+      final parentId = await _getOrCreateFolder(token, 'Tether');
       
-      // Look for existing backup file in appDataFolder
+      // Look for existing backup file in Tether folder
       final searchResponse = await _dio.get(
         'https://www.googleapis.com/drive/v3/files',
         queryParameters: {
-          'q': "name = 'tether_backup.json' and 'appDataFolder' in parents and trashed = false",
+          'q': "name = 'tether_preferences.json' and '$parentId' in parents and trashed = false",
           'fields': 'files(id)',
         },
         options: Options(headers: {'Authorization': 'Bearer $token'}),
@@ -165,8 +166,8 @@ class GoogleDriveService {
       } else {
         // Create new backup file
         final metadata = jsonEncode({
-          'name': 'tether_backup.json',
-          'parents': ['appDataFolder'],
+          'name': 'tether_preferences.json',
+          'parents': [parentId],
         });
 
         const boundary = 'tether_boundary';
@@ -199,13 +200,14 @@ class GoogleDriveService {
 
   Future<Map<String, dynamic>?> restorePreferences() async {
     try {
-      LogService.log('Google Drive: Restoring user preferences');
+      LogService.log('Google Drive: Restoring user preferences from Tether/tether_preferences.json');
       final token = await _getAccessToken();
+      final parentId = await _getOrCreateFolder(token, 'Tether');
 
       final searchResponse = await _dio.get(
         'https://www.googleapis.com/drive/v3/files',
         queryParameters: {
-          'q': "name = 'tether_backup.json' and 'appDataFolder' in parents and trashed = false",
+          'q': "name = 'tether_preferences.json' and '$parentId' in parents and trashed = false",
           'fields': 'files(id)',
         },
         options: Options(headers: {'Authorization': 'Bearer $token'}),

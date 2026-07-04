@@ -152,19 +152,18 @@ class _GalleryScreenState extends State<GalleryScreen> {
                             Positioned(
                               bottom: 8,
                               right: 8,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                decoration: BoxDecoration(
-                                  color: Colors.black54,
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Text(
-                                  DateFormat('MMM d, y · h:mm a').format(snap.date),
-                                  style: GoogleFonts.caveat(
-                                    color: Colors.white70,
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w600,
-                                  ),
+                              child: Text(
+                                DateFormat('yy  M  d   HH:mm').format(snap.date),
+                                style: GoogleFonts.vt323(
+                                  color: const Color(0xFFFF5A00),
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.bold,
+                                  shadows: [
+                                    Shadow(
+                                      color: const Color(0xFFFF5A00).withValues(alpha: 0.8),
+                                      blurRadius: 4,
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),

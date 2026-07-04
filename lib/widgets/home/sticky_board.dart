@@ -515,7 +515,7 @@ class StickyBoardState extends State<StickyBoard> {
                           color: AppTheme.primary, size: 22),
                       const SizedBox(width: 8),
                       Text(
-                        'Sticky Memory Archive',
+                        'Sticky Notes Archive',
                         style: GoogleFonts.playfairDisplay(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,

@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import '../../services/firestore_service.dart';
 import '../../theme/app_theme.dart';
 
 class QuickActions extends StatelessWidget {
@@ -11,6 +13,9 @@ class QuickActions extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final myUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    const coupleId = 'ray-aproo';
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -29,11 +34,18 @@ class QuickActions extends StatelessWidget {
               () => onNavigate(2),
             ),
             const SizedBox(width: 12),
-            _actionTile(
-              context,
-              Icons.chat_bubble_outline_rounded,
-              'Chat',
-              () => onNavigate(1),
+            StreamBuilder<int>(
+              stream: FirestoreService().unreadCountStream(coupleId, myUid),
+              builder: (context, snap) {
+                final unread = snap.data ?? 0;
+                return _actionTile(
+                  context,
+                  Icons.chat_bubble_outline_rounded,
+                  'Chat',
+                  () => onNavigate(1),
+                  unreadCount: unread,
+                );
+              },
             ),
           ],
         ),
@@ -48,6 +60,7 @@ class QuickActions extends StatelessWidget {
     VoidCallback onTap, {
     Color? iconColor,
     Color? backgroundColor,
+    int unreadCount = 0,
   }) {
     return Expanded(
       child: GestureDetector(
@@ -65,7 +78,12 @@ class QuickActions extends StatelessWidget {
           ),
           child: Column(
             children: [
-              Icon(icon, color: iconColor ?? AppTheme.primary, size: 24),
+              Badge(
+                isLabelVisible: unreadCount > 0,
+                label: Text('$unreadCount'),
+                backgroundColor: AppTheme.primary,
+                child: Icon(icon, color: iconColor ?? AppTheme.primary, size: 24),
+              ),
               const SizedBox(height: 8),
               Text(label, style: Theme.of(context).textTheme.bodySmall),
             ],
