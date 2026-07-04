@@ -153,15 +153,19 @@ class _GalleryScreenState extends State<GalleryScreen> {
                               bottom: 8,
                               right: 8,
                               child: Text(
-                                DateFormat('yy  M  d   HH:mm').format(snap.date),
+                                DateFormat('ddMMMyy  HH:mm').format(snap.date).toUpperCase(),
                                 style: GoogleFonts.vt323(
-                                  color: const Color(0xFFFF5A00),
-                                  fontSize: 24,
+                                  color: const Color(0xFFFF3D00),
+                                  fontSize: 18,
                                   fontWeight: FontWeight.bold,
                                   shadows: [
                                     Shadow(
-                                      color: const Color(0xFFFF5A00).withValues(alpha: 0.8),
-                                      blurRadius: 4,
+                                      color: const Color(0xFFFF3D00).withValues(alpha: 0.9),
+                                      blurRadius: 1,
+                                    ),
+                                    Shadow(
+                                      color: const Color(0xFFFF3D00).withValues(alpha: 0.6),
+                                      blurRadius: 6,
                                     ),
                                   ],
                                 ),

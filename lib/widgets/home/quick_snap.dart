@@ -333,15 +333,19 @@ class _QuickSnapState extends State<QuickSnap> {
     canvas.drawRect(const Rect.fromLTWH(60, 60, 960, 960), borderPaint);
 
     // 4. Draw Date/Time digital LCD stamp on bottom-right of photo
-    final dateString = DateFormat("yy  M  d   HH:mm").format(date);
+    final dateString = DateFormat("ddMMMyy  HH:mm").format(date).toUpperCase();
     final dateStyle = GoogleFonts.orbitron(
-      color: const Color(0xFFFF5A00), // Glowing retro camera orange
-      fontSize: 28,
+      color: const Color(0xFFFF3D00), // Vibrant neon camera red-orange
+      fontSize: 22,
       fontWeight: FontWeight.bold,
       shadows: [
         const Shadow(
-          color: Color(0xFFFF5A00),
-          blurRadius: 5,
+          color: Color(0xFFFF3D00),
+          blurRadius: 2,
+        ),
+        const Shadow(
+          color: Color(0xFFFF3D00),
+          blurRadius: 8,
         ),
       ],
     );
@@ -353,7 +357,7 @@ class _QuickSnapState extends State<QuickSnap> {
     datePainter.layout();
     datePainter.paint(
       canvas,
-      Offset(1080 - 60 - datePainter.width - 25, 1020 - datePainter.height - 25),
+      Offset(1080 - 60 - datePainter.width - 20, 1020 - datePainter.height - 20),
     );
 
     // 5. Draw Cursive caption at the bottom
@@ -474,15 +478,19 @@ class _QuickSnapState extends State<QuickSnap> {
                               bottom: 8,
                               right: 8,
                               child: Text(
-                                DateFormat('yy  M  d   HH:mm').format(date),
+                                DateFormat('ddMMMyy  HH:mm').format(date).toUpperCase(),
                                 style: GoogleFonts.vt323(
-                                  color: const Color(0xFFFF5A00),
-                                  fontSize: 24,
+                                  color: const Color(0xFFFF3D00),
+                                  fontSize: 18,
                                   fontWeight: FontWeight.bold,
                                   shadows: [
                                     Shadow(
-                                      color: const Color(0xFFFF5A00).withValues(alpha: 0.8),
-                                      blurRadius: 4,
+                                      color: const Color(0xFFFF3D00).withValues(alpha: 0.9),
+                                      blurRadius: 1,
+                                    ),
+                                    Shadow(
+                                      color: const Color(0xFFFF3D00).withValues(alpha: 0.6),
+                                      blurRadius: 6,
                                     ),
                                   ],
                                 ),
