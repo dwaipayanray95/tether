@@ -8,8 +8,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:open_file/open_file.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import '../../services/auth_service.dart';
 import '../../services/firestore_service.dart';
@@ -407,6 +405,15 @@ class _QuickSnapState extends State<QuickSnap> {
           ),
           actions: [
             IconButton(
+              icon: const Icon(Icons.collections_rounded, color: Colors.white, size: 26),
+              onPressed: () {
+                Navigator.push(
+                  ctx,
+                  MaterialPageRoute(builder: (_) => const GalleryScreen()),
+                );
+              },
+            ),
+            IconButton(
               icon: const Icon(Icons.download_rounded, color: Colors.white, size: 26),
               onPressed: () async {
                 HapticFeedback.lightImpact();
@@ -414,16 +421,20 @@ class _QuickSnapState extends State<QuickSnap> {
                   // Render the full polaroid in memory dynamically on-demand!
                   final polaroidBytes = await _renderPolaroidPNG(imageBytes, caption, date);
                   
-                  final tempDir = await getTemporaryDirectory();
-                  final file = File('${tempDir.path}/tether_polaroid_${DateTime.now().millisecondsSinceEpoch}.png');
-                  await file.writeAsBytes(polaroidBytes);
+                  final localSnap = await LocalStorageService().saveSnap(polaroidBytes, caption, date);
+                  
+                  // Backup to Google Drive asynchronously
+                  GoogleDriveService().uploadSnap(polaroidBytes, 'snap_${localSnap.id}.png').then((driveFileId) {
+                    if (driveFileId != null) {
+                      LocalStorageService().updateDriveFileId(localSnap.id, driveFileId);
+                    }
+                  });
 
-                  final result = await OpenFile.open(file.path);
-                  if (result.type != ResultType.done && ctx.mounted) {
+                  if (ctx.mounted) {
                     ScaffoldMessenger.of(ctx).showSnackBar(
-                      SnackBar(
-                        content: Text('Could not open file: ${result.message}'),
-                        backgroundColor: Colors.redAccent,
+                      const SnackBar(
+                        content: Text('Saved to Polaroid Gallery & Google Drive!'),
+                        backgroundColor: Colors.green,
                       ),
                     );
                   }
@@ -431,7 +442,7 @@ class _QuickSnapState extends State<QuickSnap> {
                   if (ctx.mounted) {
                     ScaffoldMessenger.of(ctx).showSnackBar(
                       SnackBar(
-                        content: Text('Error rendering polaroid: $e'),
+                        content: Text('Error saving polaroid: $e'),
                         backgroundColor: Colors.redAccent,
                       ),
                     );
@@ -692,32 +703,7 @@ class _QuickSnapState extends State<QuickSnap> {
                     ),
                   ),
 
-                // Gallery / Album Button (Top Right Overlay)
-                Positioned(
-                  top: 12,
-                  right: 12,
-                  child: ClipOval(
-                    child: Material(
-                      color: Colors.black.withValues(alpha: 0.35),
-                      child: InkWell(
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (_) => const GalleryScreen()),
-                          );
-                        },
-                        child: const Padding(
-                          padding: EdgeInsets.all(8.0),
-                          child: Icon(
-                            Icons.photo_library_rounded,
-                            color: Colors.white,
-                            size: 16,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
+
 
                 // Bottom Right Actions (Send Snap Button)
                 Positioned(

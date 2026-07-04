@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import 'package:share_plus/share_plus.dart';
 import '../services/local_storage_service.dart';
 import '../theme/app_theme.dart';
 
@@ -107,6 +108,18 @@ class _GalleryScreenState extends State<GalleryScreen> {
             onPressed: () => Navigator.pop(ctx),
           ),
           actions: [
+            IconButton(
+              icon: const Icon(Icons.share_rounded, color: Colors.white, size: 24),
+              onPressed: () async {
+                HapticFeedback.lightImpact();
+                final text = snap.caption.isNotEmpty ? snap.caption : 'Tether Polaroid Snap';
+                // ignore: deprecated_member_use
+                await Share.shareXFiles(
+                  [XFile(snap.imagePath)],
+                  text: text,
+                );
+              },
+            ),
             IconButton(
               icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 26),
               onPressed: () {
