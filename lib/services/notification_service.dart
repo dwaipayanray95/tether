@@ -8,6 +8,7 @@ import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 import '../models/todo_model.dart';
 import 'nav_service.dart';
+import 'auth_service.dart';
 import 'log_service.dart';
 
 // ── Background handler (runs in a separate isolate) ───────────────────────────
@@ -119,6 +120,7 @@ class NotificationService {
         title: n.title ?? '',
         body: n.body ?? '',
         payload: jsonEncode(message.data),
+        type: type,
       );
     });
 
@@ -174,7 +176,32 @@ class NotificationService {
     required String title,
     required String body,
     String? payload,
+    String? type,
   }) async {
+    StyleInformation? styleInformation;
+    String? shortcutId;
+
+    if (type == 'chat' || type == 'poke') {
+      final auth = AuthService();
+      final partnerName = auth.partnerDisplayName;
+      final partner = Person(
+        name: partnerName,
+        key: auth.partnerName.toLowerCase(),
+      );
+      styleInformation = MessagingStyleInformation(
+        partner,
+        conversationTitle: 'Tether with $partnerName',
+        messages: [
+          Message(
+            body,
+            DateTime.now(),
+            partner,
+          ),
+        ],
+      );
+      shortcutId = 'tether_conversation_${auth.partnerName.toLowerCase()}';
+    }
+
     await _local.show(
       title.hashCode ^ body.hashCode,
       title,
@@ -189,6 +216,8 @@ class NotificationService {
           playSound: true,
           enableVibration: true,
           icon: '@mipmap/ic_launcher',
+          styleInformation: styleInformation,
+          shortcutId: shortcutId,
         ),
       ),
       payload: payload,
