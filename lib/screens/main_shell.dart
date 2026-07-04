@@ -14,6 +14,8 @@ import '../services/firestore_service.dart';
 import '../services/notification_service.dart';
 import '../services/auth_service.dart';
 import '../services/log_service.dart';
+import '../services/google_drive_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
@@ -50,13 +52,15 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     _firestore.updatePresence(_myPresenceKey);
     _updateBatteryStatus();
     _batteryTimer = Timer.periodic(const Duration(minutes: 5), (_) => _updateBatteryStatus());
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       // Handle notification-triggered navigation on cold start
       _handlePendingNotification();
       // Check for update on launch
       _checkForUpdate();
       // Proactively check and request all permissions
       _requestAllPermissions();
+      // Restore user preferences backup from Google Drive
+      await _restorePrefsFromCloud();
     });
   }
 
@@ -77,6 +81,46 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       }
     } catch (e) {
       LogService.log('Error getting battery level: $e');
+    }
+  }
+
+  Future<void> _backupPrefsToCloud() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final keys = prefs.getKeys();
+      final Map<String, dynamic> prefsMap = {};
+      for (final key in keys) {
+        prefsMap[key] = prefs.get(key);
+      }
+      await GoogleDriveService().backupPreferences(prefsMap);
+    } catch (e) {
+      LogService.log('Failed to backup preferences: $e');
+    }
+  }
+
+  Future<void> _restorePrefsFromCloud() async {
+    try {
+      final cloudPrefs = await GoogleDriveService().restorePreferences();
+      if (cloudPrefs != null) {
+        final prefs = await SharedPreferences.getInstance();
+        for (final entry in cloudPrefs.entries) {
+          final val = entry.value;
+          if (val is bool) {
+            await prefs.setBool(entry.key, val);
+          } else if (val is int) {
+            await prefs.setInt(entry.key, val);
+          } else if (val is double) {
+            await prefs.setDouble(entry.key, val);
+          } else if (val is String) {
+            await prefs.setString(entry.key, val);
+          } else if (val is List) {
+            await prefs.setStringList(entry.key, val.cast<String>());
+          }
+        }
+        LogService.log('Preferences synced from Google Drive.');
+      }
+    } catch (e) {
+      LogService.log('Failed to restore preferences: $e');
     }
   }
 
@@ -278,6 +322,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         });
         break;
       default:
+        _backupPrefsToCloud();
         break;
     }
   }

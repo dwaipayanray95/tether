@@ -14,6 +14,9 @@ import 'package:timeago/timeago.dart' as timeago;
 import '../../services/auth_service.dart';
 import '../../services/firestore_service.dart';
 import '../../services/fcm_service.dart';
+import '../../services/local_storage_service.dart';
+import '../../services/google_drive_service.dart';
+import '../../screens/gallery_screen.dart';
 import '../../theme/app_theme.dart';
 
 class QuickSnap extends StatefulWidget {
@@ -64,100 +67,137 @@ class _QuickSnapState extends State<QuickSnap> {
 
   void _showCaptionDialog(File imageFile) {
     final captionCtrl = TextEditingController();
+    bool saveLocally = true;
+
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (dialogCtx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        backgroundColor: AppTheme.surface,
-        title: Text(
-          'Add a Caption',
-          style: GoogleFonts.dmSans(
-            fontWeight: FontWeight.bold,
-            color: AppTheme.textDark,
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          backgroundColor: AppTheme.surface,
+          title: Text(
+            'Add a Caption',
+            style: GoogleFonts.dmSans(
+              fontWeight: FontWeight.bold,
+              color: AppTheme.textDark,
+            ),
           ),
-        ),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(16),
-                child: Image.file(
-                  imageFile,
-                  height: 200,
-                  width: 200,
-                  fit: BoxFit.cover,
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: Image.file(
+                    imageFile,
+                    height: 200,
+                    width: 200,
+                    fit: BoxFit.cover,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: captionCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Caption (Cursive)',
-                  hintText: 'e.g. Thinking of you!',
+                const SizedBox(height: 16),
+                TextField(
+                  controller: captionCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Caption (Cursive)',
+                    hintText: 'e.g. Thinking of you!',
+                  ),
+                  textCapitalization: TextCapitalization.sentences,
+                  maxLength: 40,
                 ),
-                textCapitalization: TextCapitalization.sentences,
-                maxLength: 40,
-              ),
-            ],
+                CheckboxListTile(
+                  title: Text(
+                    'Save to Local & Drive',
+                    style: GoogleFonts.dmSans(fontSize: 14, color: AppTheme.textDark),
+                  ),
+                  value: saveLocally,
+                  activeColor: AppTheme.primary,
+                  contentPadding: EdgeInsets.zero,
+                  onChanged: (val) {
+                    setDialogState(() {
+                      saveLocally = val ?? true;
+                    });
+                  },
+                ),
+              ],
+            ),
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogCtx),
-            child: const Text('Cancel', style: TextStyle(color: AppTheme.textMuted)),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              final caption = captionCtrl.text.trim();
-              Navigator.pop(dialogCtx); // close dialog
-              
-              setState(() => _isUploading = true);
-              HapticFeedback.mediumImpact();
-              
-              try {
-                final originalBytes = await imageFile.readAsBytes();
-                final base64Photo = base64Encode(originalBytes);
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogCtx),
+              child: const Text('Cancel', style: TextStyle(color: AppTheme.textMuted)),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final caption = captionCtrl.text.trim();
+                Navigator.pop(dialogCtx); // close dialog
                 
-                final myKey = _auth.myName.toLowerCase(); // 'ray' or 'aproo'
-                await _firestore.sendSnap(coupleId, myKey, base64Photo, caption);
+                setState(() => _isUploading = true);
+                HapticFeedback.mediumImpact();
+                
+                try {
+                  final originalBytes = await imageFile.readAsBytes();
+                  final base64Photo = base64Encode(originalBytes);
+                  
+                  final myKey = _auth.myName.toLowerCase(); // 'ray' or 'aproo'
+                  await _firestore.sendSnap(coupleId, myKey, base64Photo, caption);
 
-                // Trigger high priority FCM push notification to partner
-                final partnerName = _auth.partnerName.toLowerCase();
-                await FcmService.send(
-                  partnerName: partnerName,
-                  title: '📷 New Polaroid Snap!',
-                  body: '${_auth.myDisplayName} sent you a Polaroid. Open Tether to view!',
-                  type: 'snap',
-                );
+                  final date = DateTime.now();
 
-                if (mounted) {
+                  // Save locally as a polaroid and backup to Google Drive
+                  if (saveLocally) {
+                    try {
+                      final polaroidBytes = await _renderPolaroidPNG(originalBytes, caption, date);
+                      final localSnap = await LocalStorageService().saveSnap(polaroidBytes, caption, date);
+
+                      // Asynchronously upload to Google Drive in background
+                      GoogleDriveService()
+                          .uploadSnap(polaroidBytes, 'snap_${localSnap.id}.png')
+                          .then((driveFileId) {
+                            if (driveFileId != null) {
+                              LocalStorageService().updateDriveFileId(localSnap.id, driveFileId);
+                            }
+                          });
+                    } catch (e) {
+                      // Silently catch local storage errors
+                    }
+                  }
+
+                  // Trigger high priority FCM push notification to partner
+                  final partnerName = _auth.partnerName.toLowerCase();
+                  await FcmService.send(
+                    partnerName: partnerName,
+                    title: '📷 New Polaroid Snap!',
+                    body: '${_auth.myDisplayName} sent you a Polaroid. Open Tether to view!',
+                    type: 'snap',
+                  );
+
+                  if (!context.mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
                       content: Text('Polaroid sent successfully! 📸'),
                       backgroundColor: Colors.green,
                     ),
                   );
-                }
-              } catch (e) {
-                if (mounted) {
+                } catch (e) {
+                  if (!context.mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text('Failed to send Polaroid: $e'),
                       backgroundColor: Colors.redAccent,
                     ),
                   );
+                } finally {
+                  if (mounted) {
+                    setState(() => _isUploading = false);
+                  }
                 }
-              } finally {
-                if (mounted) {
-                  setState(() => _isUploading = false);
-                }
-              }
-            },
-            child: const Text('Send Polaroid'),
-          ),
-        ],
+              },
+              child: const Text('Send Polaroid'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -633,6 +673,33 @@ class _QuickSnapState extends State<QuickSnap> {
                       ),
                     ),
                   ),
+
+                // Gallery / Album Button (Top Right Overlay)
+                Positioned(
+                  top: 12,
+                  right: 12,
+                  child: ClipOval(
+                    child: Material(
+                      color: Colors.black.withValues(alpha: 0.35),
+                      child: InkWell(
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const GalleryScreen()),
+                          );
+                        },
+                        child: const Padding(
+                          padding: EdgeInsets.all(8.0),
+                          child: Icon(
+                            Icons.photo_library_rounded,
+                            color: Colors.white,
+                            size: 16,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
 
                 // Bottom Right Actions (Send Snap Button)
                 Positioned(
