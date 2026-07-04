@@ -2,10 +2,11 @@
 
 These are the core hardcoded constants, credentials, helper guidelines, styling colors, and routing schemas used in Tether.
 
-## Core Constants
+## Core Constants & Secrets
 
-- **Couple Identifier:** `const coupleId = 'ray-aproo';` (never change, hardcoded in Firestore paths).
-- **Authorized Emails:** `const allowedEmails = ['ray@redacted.invalid', 'aproo@redacted.invalid'];`
+- **Configuration File:** All secret parameters are stored inside `lib/config/env_config.dart` (which is gitignored and populated on GitHub Actions runners using `ENV_CONFIG_DART`).
+- **Couple Identifier:** `EnvConfig.coupleId` (`'ray-aproo'`) — shared ID for Firestore collections.
+- **Authorized Emails:** `EnvConfig.allowedEmails` (`['ray@redacted.invalid', 'aproo@redacted.invalid']`).
 
 ## Auth & Name Mapping
 

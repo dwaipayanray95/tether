@@ -1,15 +1,13 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../config/env_config.dart';
 import 'log_service.dart';
 
 // Only these two emails are allowed in
-const List<String> allowedEmails = [
-  'ray@redacted.invalid', // Raayyy
-  'aproo@redacted.invalid',      // Aproo
-];
+const List<String> allowedEmails = EnvConfig.allowedEmails;
 
-const String coupleId = 'ray-aproo'; // shared ID for Firestore collections
+const String coupleId = EnvConfig.coupleId; // shared ID for Firestore collections
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;

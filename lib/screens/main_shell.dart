@@ -15,6 +15,7 @@ import '../services/notification_service.dart';
 import '../services/auth_service.dart';
 import '../services/log_service.dart';
 import '../services/google_drive_service.dart';
+import '../config/env_config.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class MainShell extends StatefulWidget {
@@ -29,7 +30,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   final _chatKey = GlobalKey<ChatScreenState>();
   final _firestore = FirestoreService();
   final _auth = AuthService();
-  static const _coupleId = 'ray-aproo';
+  static const _coupleId = EnvConfig.coupleId;
   String get _myUid => FirebaseAuth.instance.currentUser?.uid ?? '';
   String get _myPresenceKey => _auth.isRay ? 'ray' : 'aproo';
 

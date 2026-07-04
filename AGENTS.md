@@ -254,12 +254,18 @@ proximity_sync/
 
 ---
 
-## Key Constants (Never Change)
+## Key Constants & Secrets (Gitignored & Restored via GitHub Secrets)
+
+Sensitive variables like permitted emails, couple ID, and maps API Key are loaded from **`lib/config/env_config.dart`**. This file is gitignored. On GitHub Action runs, it is restored dynamically using the `ENV_CONFIG_DART` secret:
 
 ```dart
-// auth_service.dart
-const coupleId = 'ray-aproo';
-const allowedEmails = ['ray@redacted.invalid', 'aproo@redacted.invalid'];
+// lib/config/env_config.dart (Template / Default Values)
+class EnvConfig {
+  static const allowedEmails = ['ray@redacted.invalid', 'aproo@redacted.invalid'];
+  static const coupleId = 'ray-aproo';
+  static const mapsApiKey = 'REDACTED_MAPS_API_KEY';
+}
+```
 
 // Auth helpers
 AuthService().isRay            // true if current user is Ray
