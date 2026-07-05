@@ -18,6 +18,10 @@ This document logs features that were previously designed or partially documente
 - **Removed Platform Channels:** Custom `MethodChannel` integrations (`com.theawesomeray.tether/proximity`) targeting native Android sensors are fully removed.
 - **Native Implementation:** `android/app/src/main/kotlin/com/theawesomeray/tether/MainActivity.kt` has been completely cleaned and contains no custom MethodChannels or custom Kotlin overrides anymore.
 
+### 3. Location Screen Dead Code
+- **Removed Screens:** `lib/screens/location_screen.dart` (the entire Google Maps full-screen view showing both partners' pins).
+- **Details:** The app has removed this screen since location streaming and map view features are handled elsewhere or unused, keeping the codebase completely clean from dead references.
+
 ---
 
 ## 🔔 Notification System Discrepancies

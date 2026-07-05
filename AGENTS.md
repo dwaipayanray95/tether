@@ -50,11 +50,12 @@ lib/
 │   ├── todo_screen.dart         # Shared to-do list with priority, assignment, due date, checklist
 │   ├── login_screen.dart        # Google Sign-In gate
 │   ├── settings_screen.dart     # App version (dynamic), sign out, diagnostics link
-│   ├── diagnostics_screen.dart  # Log viewer: enable/disable logging, view/clear log file
-│   └── location_screen.dart     # Full-screen Google Map showing both users' pins + bottom info card
+│   └── diagnostics_screen.dart  # Log viewer: enable/disable logging, view/clear log file
 ├── services/
 │   ├── auth_service.dart        # Firebase Auth + Google Sign-In
 │   │                            # isRay, myName, myDisplayName, partnerName, partnerDisplayName
+│   ├── crypto_service.dart      # E2EE key pairs generation/exchange & AES-GCM data encryption
+│   ├── voice_service.dart       # Encrypts Opus recording (via record) & local decrypt (via flutter_sound)
 │   ├── firestore_service.dart   # All Firestore reads/writes:
 │   │                            #   messages, todos, presence, poke, sticky notes, locations
 │   ├── fcm_service.dart         # Sends FCM via HTTP v1 API with RSA-signed service-account JWT
@@ -124,8 +125,8 @@ All couple data lives under `couples/ray-aproo/`.
 ```
 couples/ray-aproo/
   ├── messages/{msgId}
-  │     senderId, text, type ('text'|'image'|'poke'),
-  │     imageUrl?, sentAt, readBy[], readTimes{uid→ts},
+  │     senderId, text, type ('text'|'image'|'poke'|'voice'),
+  │     imageUrl?, audioUrl?, duration?, sentAt, readBy[], readTimes{uid→ts},
   │     reactions{emoji→[uid]}, replyToId?, replyToText?
   ├── todos/{todoId}
   │     title, details?, isDone, createdBy, createdAt,
@@ -183,7 +184,10 @@ proximity_sync/
 | Message search | `search_screen.dart` + `firestore_service.dart` → `getAllMessages()` |
 | Sending images | `chat_screen.dart` → `_pickAndSendImage()` |
 | Firestore message read/write | `firestore_service.dart` → `messageStream()`, `sendMessage()`, `fetchMessagePage()` |
-| MessageType values | `message_model.dart` → `MessageType` enum (text, image, poke) |
+| MessageType values | `message_model.dart` → `MessageType` enum (text, image, poke, voice) |
+| Voice notes / scrubbing | `chat_screen.dart` → `VoicePlaybackWidget` + `voice_service.dart` |
+| Date timeline headers | `chat_screen.dart` → `buildDateHeader()` |
+| E2EE pre-cache scrolls | `chat_screen.dart` → `_initSharedKey()` / caching `_sharedKey` |
 
 ### 🏠 Home Screen
 | Change | Files |
@@ -225,7 +229,6 @@ proximity_sync/
 |--------|-------|
 | Location upload / stream | `location_service.dart` |
 | Force-refresh / ping partner | `location_service.dart` → `pingPartner()` |
-| Full-screen location map | `location_screen.dart` — opened via FAB or deep link (not in bottom nav) |
 | Firestore location path | `couples/ray-aproo/locations/{ray|aproo}` |
 
 ### 🎵 Music Sync
@@ -288,6 +291,7 @@ Tether implements standard zero-trust E2EE using Elliptic Curve Diffie-Hellman (
 * **Encrypted Fields**:
   * Messages: Stored in the `text` field as E2EE JSON strings.
   * Snaps: Cropped Base64 photo and caption are stored as E2EE JSON strings.
+  * Voice Notes: Recorded Opus audio bytes are encrypted and stored in the message's `audioUrl` field as an E2EE JSON string.
   * Todos: Titles, details, and checklist items titles are stored as E2EE JSON strings.
   * Todo Comments: Comment text is stored as E2EE JSON strings.
   * Sticky Notes: Note text is stored as E2EE JSON strings.

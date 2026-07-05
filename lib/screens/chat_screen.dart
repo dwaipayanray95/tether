@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:convert';
 import '../services/crypto_service.dart';
 import '../services/voice_service.dart';
+import 'package:cryptography/cryptography.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter_sound/flutter_sound.dart';
@@ -94,6 +95,19 @@ class ChatScreenState extends State<ChatScreen> {
 
   // E2EE decryption cache
   final Map<String, String> _decryptedTextCache = {};
+  SecretKey? _sharedKey;
+
+  Future<void> _initSharedKey() async {
+    try {
+      final partnerPubKey = await CryptoService().fetchPartnerPublicKey();
+      if (partnerPubKey != null) {
+        _sharedKey = await CryptoService().getSharedKey(partnerPubKey);
+        if (mounted) setState(() {});
+      }
+    } catch (e) {
+      LogService.log('Error pre-initializing shared key: $e');
+    }
+  }
 
   String _getOrDecryptText(Message message) {
     if (!message.text.startsWith('{"ciphertext":')) {
@@ -108,18 +122,22 @@ class ChatScreenState extends State<ChatScreen> {
 
   Future<void> _decryptMessageInBackground(Message message) async {
     try {
-      final partnerPubKey = await CryptoService().fetchPartnerPublicKey();
-      if (partnerPubKey == null) {
-        if (mounted) {
-          setState(() {
-            _decryptedTextCache[message.id] = message.text; // Fallback to raw text if no key found yet
-          });
+      SecretKey? key = _sharedKey;
+      if (key == null) {
+        final partnerPubKey = await CryptoService().fetchPartnerPublicKey();
+        if (partnerPubKey == null) {
+          if (mounted) {
+            setState(() {
+              _decryptedTextCache[message.id] = message.text; // Fallback to raw text if no key found yet
+            });
+          }
+          return;
         }
-        return;
+        key = await CryptoService().getSharedKey(partnerPubKey);
+        _sharedKey = key;
       }
-      final sharedKey = await CryptoService().getSharedKey(partnerPubKey);
       final encryptedData = jsonDecode(message.text) as Map<String, dynamic>;
-      final decrypted = await CryptoService().decryptText(encryptedData, sharedKey);
+      final decrypted = await CryptoService().decryptText(encryptedData, key);
       if (mounted) {
         setState(() {
           _decryptedTextCache[message.id] = decrypted;
@@ -175,6 +193,7 @@ class ChatScreenState extends State<ChatScreen> {
     super.initState();
     NotificationService.chatIsOpen = widget.isActive;
     _loadInitialMessages();
+    _initSharedKey();
     _itemPositionsListener.itemPositions.addListener(_onPositionsChanged);
     _textCtrl.addListener(() {
       if (mounted) setState(() {});
@@ -724,7 +743,53 @@ class ChatScreenState extends State<ChatScreen> {
           );
         }
         final msg = display[i];
-        return AnimatedContainer(
+
+        bool showDateHeader = false;
+        if (i == display.length - 1) {
+          showDateHeader = true;
+        } else {
+          final olderMsg = display[i + 1];
+          final dateCurrent = msg.sentAt;
+          final dateOlder = olderMsg.sentAt;
+          if (dateCurrent.year != dateOlder.year ||
+              dateCurrent.month != dateOlder.month ||
+              dateCurrent.day != dateOlder.day) {
+            showDateHeader = true;
+          }
+        }
+
+        Widget buildDateHeader(DateTime date) {
+          String text = '';
+          final now = DateTime.now();
+          if (date.year == now.year && date.month == now.month && date.day == now.day) {
+            text = 'Today';
+          } else if (date.year == now.year && date.month == now.month && date.day == now.day - 1) {
+            text = 'Yesterday';
+          } else {
+            text = DateFormat('MMMM d, yyyy').format(date);
+          }
+
+          return Center(
+            child: Container(
+              margin: const EdgeInsets.symmetric(vertical: 16),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                text,
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.textMuted,
+                ),
+              ),
+            ),
+          );
+        }
+
+        final msgWidget = AnimatedContainer(
           duration: const Duration(milliseconds: 500),
           color: msg.id == _highlightedId
               ? AppTheme.primary.withValues(alpha: 0.12)
@@ -748,6 +813,17 @@ class ChatScreenState extends State<ChatScreen> {
             ),
           ),
         );
+
+        if (showDateHeader) {
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              buildDateHeader(msg.sentAt),
+              msgWidget,
+            ],
+          );
+        }
+        return msgWidget;
       },
     );
   }

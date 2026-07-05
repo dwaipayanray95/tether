@@ -13,6 +13,9 @@ Use this map to identify which files to read or modify when editing specific app
 - **Message Search Overlays:** `search_screen.dart` + `firestore_service.dart` → `getAllMessages()`.
 - **Image Sending Flows:** `chat_screen.dart` → `_pickAndSendImage()`.
 - **Firestore Messaging Reads/Writes:** `firestore_service.dart` → `messageStream()`, `sendMessage()`, `fetchMessagePage()`.
+- **E2EE Voice Notes & Scrubbing:** `chat_screen.dart` → `VoicePlaybackWidget` + `voice_service.dart` (recording via record, play/decode via flutter_sound).
+- **Date Breaker Banners:** `chat_screen.dart` → `buildDateHeader()`.
+- **E2EE Pre-cache Scroll Optimization:** `chat_screen.dart` → `_initSharedKey()` / caching `_sharedKey` state.
 
 ### 🏠 Home Screen & Presence
 - **Distance Card Calculation:** `home_screen.dart` → `_buildDistanceCard()`.

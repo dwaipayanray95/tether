@@ -119,16 +119,28 @@ class LocalStorageService {
   Future<void> deleteSnap(LocalSnap snap) async {
     try {
       LogService.log('Local Storage: Deleting snap ${snap.id}');
+      
+      // Read latest JSON from disk to get non-stale driveFileId from background upload
+      final dir = await _snapsDir;
+      final jsonFile = File('${dir.path}/snap_${snap.id}.json');
+      String? driveFileId = snap.driveFileId;
+      
+      if (await jsonFile.exists()) {
+        final content = await jsonFile.readAsString();
+        final json = jsonDecode(content) as Map<String, dynamic>;
+        if (json['driveFileId'] != null) {
+          driveFileId = json['driveFileId'] as String;
+        }
+      }
+
       // 1. Delete local files
       final imgFile = File(snap.imagePath);
-      final jsonFile = File(snap.imagePath.replaceAll('.png', '.json'));
-      
       if (await imgFile.exists()) await imgFile.delete();
       if (await jsonFile.exists()) await jsonFile.delete();
 
       // 2. Delete cloud backup if sync file ID exists
-      if (snap.driveFileId != null) {
-        await _driveService.deleteFile(snap.driveFileId!);
+      if (driveFileId != null) {
+        await _driveService.deleteFile(driveFileId);
       }
       LogService.log('Local Storage: Snap ${snap.id} deleted successfully');
     } catch (e) {
