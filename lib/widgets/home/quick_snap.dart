@@ -396,7 +396,7 @@ class _QuickSnapState extends State<QuickSnap> {
   Future<Uint8List> _renderPolaroidPNG(Uint8List imageBytes, String caption, DateTime date) async {
     // Ensure Google Fonts are fully loaded before rendering to canvas
     await GoogleFonts.pendingFonts([
-      GoogleFonts.caveat(),
+      GoogleFonts.caveat(fontWeight: FontWeight.bold),
       GoogleFonts.vt323(),
     ]);
 
@@ -466,7 +466,7 @@ class _QuickSnapState extends State<QuickSnap> {
       final captionStyle = GoogleFonts.caveat(
         color: const Color(0xFF2D2D2D),
         fontSize: 56,
-        fontWeight: FontWeight.w600,
+        fontWeight: FontWeight.bold,
       );
       final captionSpan = TextSpan(text: caption, style: captionStyle);
       final captionPainter = TextPainter(

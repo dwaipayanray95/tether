@@ -5,6 +5,8 @@ import '../services/log_service.dart';
 import '../services/notification_service.dart';
 import '../services/fcm_service.dart';
 import '../services/auth_service.dart';
+import '../services/crypto_service.dart';
+import '../services/google_drive_service.dart';
 import '../theme/app_theme.dart';
 
 class DiagnosticsScreen extends StatefulWidget {
@@ -59,6 +61,12 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
             title: 'FCM Push to Partner',
             subtitle: 'Sends a connection test to partner device',
             onTap: _testFcmPartner,
+          ),
+          _buildTile(
+            icon: Icons.security_rounded,
+            title: 'E2EE Encryption Test',
+            subtitle: 'Checks encryption status and tests secure channel',
+            onTap: _testE2EE,
           ),
         ],
       ),
@@ -173,6 +181,124 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
       title: 'FCM Partner Test Result',
       success: res.success,
       message: res.message,
+    );
+  }
+
+  Future<void> _testE2EE() async {
+    LogService.log('Running E2EE Diagnostic Test');
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator(color: AppTheme.primary)),
+    );
+
+    final cryptoService = CryptoService();
+    final driveService = GoogleDriveService();
+
+    final localPubKey = await cryptoService.getPublicKey();
+    final localPrivKey = await cryptoService.getPrivateKey();
+    final localKeysOk = localPubKey != null && localPrivKey != null;
+
+    final partnerPubKey = await cryptoService.fetchPartnerPublicKey();
+    final partnerKeyOk = partnerPubKey != null;
+
+    final backup = await driveService.restoreKeyBackup();
+    final backupOk = backup != null;
+
+    bool channelOk = false;
+    String channelDetails = '';
+
+    if (localKeysOk && partnerPubKey != null) {
+      try {
+        final sharedKey = await cryptoService.getSharedKey(partnerPubKey);
+        const testStr = 'Tether E2EE Diagnostic Channel Test String';
+        final encrypted = await cryptoService.encryptText(testStr, sharedKey);
+        final decrypted = await cryptoService.decryptText(encrypted, sharedKey);
+        if (decrypted == testStr) {
+          channelOk = true;
+          channelDetails = 'AES-GCM (256-bit) shared secret key verified.';
+        } else {
+          channelDetails = 'Decryption mismatch error.';
+        }
+      } catch (e) {
+        channelDetails = 'Crypto failure: $e';
+      }
+    } else {
+      channelDetails = 'Unavailable (local keys or partner key missing).';
+    }
+
+    if (mounted) Navigator.pop(context); // Dismiss loader
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: Row(
+          children: [
+            Icon(
+              (localKeysOk && partnerKeyOk && backupOk && channelOk)
+                  ? Icons.verified_user_rounded
+                  : Icons.gpp_maybe_rounded,
+              color: (localKeysOk && partnerKeyOk && backupOk && channelOk)
+                  ? Colors.green
+                  : Colors.orange,
+            ),
+            const SizedBox(width: 8),
+            Text('E2EE Diagnostics', style: GoogleFonts.playfairDisplay(fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildCheckrow('Local Keypair status', localKeysOk),
+            _buildCheckrow('Partner Public Key synced', partnerKeyOk),
+            _buildCheckrow('Google Drive Backup verified', backupOk),
+            _buildCheckrow('Encryption Channel status', channelOk),
+            const SizedBox(height: 12),
+            const Divider(),
+            const SizedBox(height: 8),
+            Text(
+              'Channel details:\n$channelDetails',
+              style: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCheckrow(String label, bool isOk) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Icon(
+            isOk ? Icons.check_circle_rounded : Icons.cancel_rounded,
+            color: isOk ? Colors.green : Colors.red,
+            size: 18,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                color: AppTheme.textDark,
+                fontWeight: isOk ? FontWeight.w500 : FontWeight.normal,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
