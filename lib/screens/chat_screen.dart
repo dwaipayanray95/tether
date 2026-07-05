@@ -209,8 +209,18 @@ class ChatScreenState extends State<ChatScreen> {
 
   void _onStreamUpdate(List<Message> streamMessages) {
     if (!mounted) return;
+
+    final existingIds = {for (final m in _messages) m.id};
+    final newPartnerMessages = streamMessages
+        .where((m) => !existingIds.contains(m.id) && m.senderId != _myUid)
+        .toList();
+
+    if (newPartnerMessages.isNotEmpty && !widget.isActive) {
+      LogService.log('New incoming message received while chat tab is inactive. Triggering vibration.');
+      HapticFeedback.vibrate();
+    }
+
     setState(() {
-      final existingIds = {for (final m in _messages) m.id};
       // Prepend any genuinely new messages (not yet in our list)
       final newOnes = streamMessages
           .where((m) => !existingIds.contains(m.id))
