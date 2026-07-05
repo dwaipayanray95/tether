@@ -266,7 +266,6 @@ Sensitive variables like permitted emails, couple ID, and maps API Key are loade
 class EnvConfig {
   static const allowedEmails = ['ray@redacted.invalid', 'aproo@redacted.invalid'];
   static const coupleId = 'ray-aproo';
-  static const mapsApiKey = 'REDACTED_MAPS_API_KEY';
 }
 ```
 

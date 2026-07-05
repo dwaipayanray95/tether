@@ -55,9 +55,8 @@ jobs:
             echo "$ENV_CONFIG" > lib/config/env_config.dart
           else
             echo "class EnvConfig {" > lib/config/env_config.dart
-            echo "  static const allowedEmails = ['ray@redacted.invalid', 'aproo@redacted.invalid'];" >> lib/config/env_config.dart
-            echo "  static const coupleId = 'ray-aproo';" >> lib/config/env_config.dart
-            echo "  static const mapsApiKey = 'REDACTED_MAPS_API_KEY';" >> lib/config/env_config.dart
+            echo "  static const allowedEmails = ['user1@example.com', 'user2@example.com'];" >> lib/config/env_config.dart
+            echo "  static const coupleId = 'dummy-couple-id';" >> lib/config/env_config.dart
             echo "}" >> lib/config/env_config.dart
           fi
 
@@ -75,19 +74,31 @@ jobs:
       - name: Build arm64-v8a APK
         run: flutter build apk --target-platform android-arm64 --split-per-abi
 
+      - name: Rename APK file
+        run: |
+          mv build/app/outputs/flutter-apk/app-arm64-v8a-release.apk build/app/outputs/flutter-apk/Tether_${{ github.ref_name }}.apk
+
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: app-arm64-v8a-release-apk
-          path: build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          name: Tether_${{ github.ref_name }}
+          path: build/app/outputs/flutter-apk/Tether_${{ github.ref_name }}.apk
           if-no-files-found: error
+
+      - name: Build Changelog
+        if: startsWith(github.ref, 'refs/tags/v')
+        id: build_changelog
+        uses: mikepenz/release-changelog-builder-action@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create GitHub Release Draft
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          files: build/app/outputs/flutter-apk/Tether_${{ github.ref_name }}.apk
           draft: true
           prerelease: false
+          body: ${{ steps.build_changelog.outputs.changelog }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
