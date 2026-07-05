@@ -228,4 +228,37 @@ class CryptoService {
     }
     return null;
   }
+
+  /// High-level utility to encrypt a string. Automatically handles key agreement.
+  /// Falls back to plaintext if setup is incomplete or error occurs.
+  Future<String> encryptString(String plainText) async {
+    if (plainText.isEmpty) return plainText;
+    try {
+      final partnerPubKey = await fetchPartnerPublicKey();
+      if (partnerPubKey == null) return plainText;
+
+      final sharedKey = await getSharedKey(partnerPubKey);
+      final encryptedMap = await encryptText(plainText, sharedKey);
+      return jsonEncode(encryptedMap);
+    } catch (e) {
+      LogService.log('Crypto: High-level encrypt failed: $e');
+      return plainText;
+    }
+  }
+
+  /// High-level utility to decrypt a string. Automatically handles legacy formats and errors.
+  Future<String> decryptString(String text) async {
+    if (text.isEmpty || !text.startsWith('{"ciphertext":')) return text;
+    try {
+      final partnerPubKey = await fetchPartnerPublicKey();
+      if (partnerPubKey == null) return text;
+
+      final sharedKey = await getSharedKey(partnerPubKey);
+      final encryptedData = jsonDecode(text) as Map<String, dynamic>;
+      return await decryptText(encryptedData, sharedKey);
+    } catch (e) {
+      LogService.log('Crypto: High-level decrypt failed: $e');
+      return text;
+    }
+  }
 }

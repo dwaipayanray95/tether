@@ -10,10 +10,11 @@ These are the core hardcoded constants, credentials, helper guidelines, styling 
 
 ## End-to-End Encryption (E2EE)
 
+- **Mandatory Architecture Rule:** Every new feature added to the app MUST be end-to-end encrypted. No user-generated content may be stored in plaintext.
 - **Cryptography:** AES-GCM (256-bit) and X25519 Elliptic Curve Diffie-Hellman (ECDH) key exchange.
 - **Keys Storage:** Private keys are saved locally in Secure Storage (`flutter_secure_storage`). Public keys are published to `/couples/ray-aproo/status/presence` doc under `${userKey}.publicKey`.
 - **Key Recovery:** Encrypted locally using a PBKDF2 derived key from the user's 4-digit PIN, and uploaded to Google Drive as `tether_key_backup.json`.
-- **Encrypted Payloads:** Messages and snap media captions/photos are stored as base64 JSON objects beginning with `{"ciphertext":` if encrypted.
+- **Encrypted Payloads:** Messages, Snaps, Tasks, Comments, and Sticky Notes text are stored as base64 JSON objects beginning with `{"ciphertext":` if encrypted.
 
 ## Auth & Name Mapping
 

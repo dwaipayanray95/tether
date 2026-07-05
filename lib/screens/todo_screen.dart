@@ -11,6 +11,7 @@ import '../services/firestore_service.dart';
 import '../services/notification_service.dart';
 import '../services/log_service.dart';
 import '../theme/app_theme.dart';
+import '../services/crypto_service.dart';
 import 'package:google_fonts/google_fonts.dart';
 class TodoScreen extends StatefulWidget {
   const TodoScreen({super.key});
@@ -26,6 +27,31 @@ class _TodoScreenState extends State<TodoScreen> {
   final _detailsCtrl = TextEditingController();
   static const String _coupleId = coupleId;
   bool _showDone = false;
+
+  // E2EE decryption cache
+  final Map<String, String> _decryptedTextCache = {};
+
+  String _getOrDecrypt(String key, String text) {
+    if (!text.startsWith('{"ciphertext":')) {
+      return text;
+    }
+    if (_decryptedTextCache.containsKey(key)) {
+      return _decryptedTextCache[key]!;
+    }
+    _decryptInBackground(key, text);
+    return '...';
+  }
+
+  Future<void> _decryptInBackground(String key, String text) async {
+    try {
+      final decrypted = await CryptoService().decryptString(text);
+      if (mounted) {
+        setState(() {
+          _decryptedTextCache[key] = decrypted;
+        });
+      }
+    } catch (_) {}
+  }
 
   String get _myUid => FirebaseAuth.instance.currentUser?.uid ?? '';
 
@@ -424,6 +450,7 @@ class _TodoScreenState extends State<TodoScreen> {
                           coupleId: _coupleId,
                           firestore: _firestore,
                           onTap: () => _openDetail(pending[i]),
+                          decrypt: _getOrDecrypt,
                           isStacked: true,
                         ),
                         if (i < pending.length - 1)
@@ -502,6 +529,7 @@ class _TodoScreenState extends State<TodoScreen> {
                             coupleId: _coupleId,
                             firestore: _firestore,
                             onTap: () => _openDetail(done[i]),
+                            decrypt: _getOrDecrypt,
                             isStacked: true,
                           ),
                           if (i < done.length - 1)
@@ -539,12 +567,14 @@ class _TodoTile extends StatelessWidget {
   final FirestoreService firestore;
   final VoidCallback onTap;
   final bool isStacked;
+  final String Function(String key, String text) decrypt;
 
   const _TodoTile({
     required this.todo,
     required this.coupleId,
     required this.firestore,
     required this.onTap,
+    required this.decrypt,
     this.isStacked = false,
   });
 
@@ -778,7 +808,7 @@ class _TodoTile extends StatelessWidget {
               ),
             ),
             title: Text(
-              todo.title,
+              decrypt('todo_title_${todo.id}', todo.title),
               style: TextStyle(
                 decoration: todo.isDone ? TextDecoration.lineThrough : null,
                 color: todo.isDone ? AppTheme.textMuted : AppTheme.textDark,
@@ -793,7 +823,7 @@ class _TodoTile extends StatelessWidget {
                       children: [
                         if (todo.details != null && todo.details!.isNotEmpty) ...[
                           Text(
-                            todo.details!,
+                            decrypt('todo_details_${todo.id}', todo.details!),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
@@ -872,10 +902,46 @@ class _TodoDetailSheetState extends State<_TodoDetailSheet> {
   bool _sending = false;
   bool _editingDetails = false;
 
+  // E2EE decryption cache
+  final Map<String, String> _decryptedTextCache = {};
+
+  String _getOrDecrypt(String key, String text) {
+    if (!text.startsWith('{"ciphertext":')) {
+      return text;
+    }
+    if (_decryptedTextCache.containsKey(key)) {
+      return _decryptedTextCache[key]!;
+    }
+    _decryptInBackground(key, text);
+    return '...';
+  }
+
+  Future<void> _decryptInBackground(String key, String text) async {
+    try {
+      final decrypted = await CryptoService().decryptString(text);
+      if (mounted) {
+        setState(() {
+          _decryptedTextCache[key] = decrypted;
+        });
+      }
+    } catch (_) {}
+  }
+
   @override
   void initState() {
     super.initState();
-    _detailsCtrl.text = widget.todo.details ?? '';
+    _initializeDetailsCtrl();
+  }
+
+  Future<void> _initializeDetailsCtrl() async {
+    final plainDetails = widget.todo.details != null
+        ? await CryptoService().decryptString(widget.todo.details!)
+        : '';
+    if (mounted) {
+      setState(() {
+        _detailsCtrl.text = plainDetails;
+      });
+    }
   }
 
   @override
@@ -1053,7 +1119,7 @@ class _TodoDetailSheetState extends State<_TodoDetailSheet> {
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        item.title,
+                        _getOrDecrypt('checklist_title_${item.id}', item.title),
                         style: TextStyle(
                           fontSize: 14,
                           color: item.isDone ? AppTheme.textMuted : AppTheme.textDark,
@@ -1185,7 +1251,7 @@ class _TodoDetailSheetState extends State<_TodoDetailSheet> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        currentTodo.title,
+                        _getOrDecrypt('todo_title_${currentTodo.id}', currentTodo.title),
                         style: TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.w600,
@@ -1241,7 +1307,7 @@ class _TodoDetailSheetState extends State<_TodoDetailSheet> {
                             Expanded(
                               child: Text(
                                 currentTodo.details?.isNotEmpty == true
-                                    ? currentTodo.details!
+                                    ? _getOrDecrypt('todo_details_${currentTodo.id}', currentTodo.details!)
                                     : 'Add details...',
                                 style: TextStyle(
                                   fontSize: 14,
@@ -1570,7 +1636,7 @@ class _TodoDetailSheetState extends State<_TodoDetailSheet> {
                                           ? CrossAxisAlignment.end
                                           : CrossAxisAlignment.start,
                                       children: [
-                                        Text(c.text,
+                                        Text(_getOrDecrypt('comment_text_${c.id}', c.text),
                                             style: TextStyle(
                                                 fontSize: 14,
                                                 color: isMe

@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import '../../services/auth_service.dart';
 import '../../services/firestore_service.dart';
+import '../../services/crypto_service.dart';
 import '../../theme/app_theme.dart';
 
 // ── Pastel colours shared between board and archive ───────────────────────────
@@ -271,6 +272,31 @@ class StickyBoardState extends State<StickyBoard> {
   final _auth = AuthService();
   final _firestore = FirestoreService();
   late final Stream<QuerySnapshot<Map<String, dynamic>>> _stream;
+
+  // E2EE decryption cache
+  final Map<String, String> _decryptedTextCache = {};
+
+  String _getOrDecrypt(String key, String text) {
+    if (!text.startsWith('{"ciphertext":')) {
+      return text;
+    }
+    if (_decryptedTextCache.containsKey(key)) {
+      return _decryptedTextCache[key]!;
+    }
+    _decryptInBackground(key, text);
+    return '...';
+  }
+
+  Future<void> _decryptInBackground(String key, String text) async {
+    try {
+      final decrypted = await CryptoService().decryptString(text);
+      if (mounted) {
+        setState(() {
+          _decryptedTextCache[key] = decrypted;
+        });
+      }
+    } catch (_) {}
+  }
 
   @override
   void initState() {
@@ -583,7 +609,7 @@ class StickyBoardState extends State<StickyBoard> {
                                 children: [
                                   Expanded(
                                     child: Text(
-                                      text,
+                                      _getOrDecrypt('sticky_$id', text),
                                       style: GoogleFonts.dmSans(
                                         fontSize: 13,
                                         fontWeight: FontWeight.w500,
@@ -777,7 +803,7 @@ class StickyBoardState extends State<StickyBoard> {
 
               return StickyNoteTile(
                 id: id,
-                text: text,
+                text: _getOrDecrypt('sticky_$id', text),
                 colorIndex: colorIdx,
                 author: author,
                 isMe: authorUid == _auth.currentUser!.uid,

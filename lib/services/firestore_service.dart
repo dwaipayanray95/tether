@@ -5,6 +5,7 @@ import '../models/comment_model.dart';
 import '../models/message_model.dart';
 import 'fcm_service.dart';
 import 'log_service.dart';
+import 'crypto_service.dart';
 import 'auth_service.dart';
 
 class FirestoreService {
@@ -57,18 +58,40 @@ class FirestoreService {
 
   Future<void> addTodo(String coupleId, TodoItem todo) async {
     LogService.log('Adding to-do: ${todo.title}');
+    
+    final titleEnc = await CryptoService().encryptString(todo.title);
+    final detailsEnc = todo.details != null ? await CryptoService().encryptString(todo.details!) : null;
+    final List<ChecklistItem> checklistEnc = [];
+    for (final item in todo.checklist) {
+      checklistEnc.add(item.copyWith(title: await CryptoService().encryptString(item.title)));
+    }
+
+    final encryptedTodo = TodoItem(
+      id: todo.id,
+      title: titleEnc,
+      details: detailsEnc,
+      isDone: todo.isDone,
+      createdBy: todo.createdBy,
+      createdAt: todo.createdAt,
+      dueDate: todo.dueDate,
+      assignedTo: todo.assignedTo,
+      priority: todo.priority,
+      completedAt: todo.completedAt,
+      checklist: checklistEnc,
+    );
+
     await _db
         .collection('couples')
         .doc(coupleId)
         .collection('todos')
-        .add(todo.toMap());
+        .add(encryptedTodo.toMap());
     final auth = AuthService();
     final senderName = auth.myName;
     final partnerName = auth.partnerName.toLowerCase();
     FcmService.send(
       partnerName: partnerName,
       title: '✅ New task added',
-      body: '$senderName: ${todo.title}',
+      body: '$senderName added a task',
       type: 'todo',
     );
   }
@@ -93,24 +116,29 @@ class FirestoreService {
   }
 
   Future<void> updateTodoDetails(
-      String coupleId, String todoId, String details) {
+      String coupleId, String todoId, String details) async {
+    final detailsEnc = await CryptoService().encryptString(details);
     return _db
         .collection('couples')
         .doc(coupleId)
         .collection('todos')
         .doc(todoId)
-        .update({'details': details});
+        .update({'details': detailsEnc});
   }
 
   Future<void> updateTodoChecklist(
-      String coupleId, String todoId, List<ChecklistItem> checklist) {
+      String coupleId, String todoId, List<ChecklistItem> checklist) async {
+    final List<ChecklistItem> checklistEnc = [];
+    for (final item in checklist) {
+      checklistEnc.add(item.copyWith(title: await CryptoService().encryptString(item.title)));
+    }
     return _db
         .collection('couples')
         .doc(coupleId)
         .collection('todos')
         .doc(todoId)
         .update({
-      'checklist': checklist.map((item) => item.toMap()).toList(),
+      'checklist': checklistEnc.map((item) => item.toMap()).toList(),
     });
   }
 
@@ -165,19 +193,27 @@ class FirestoreService {
 
   Future<void> addComment(
       String coupleId, String todoId, TodoComment comment, String todoTitle) async {
+    final textEnc = await CryptoService().encryptString(comment.text);
+    final encryptedComment = TodoComment(
+      id: comment.id,
+      text: textEnc,
+      authorName: comment.authorName,
+      createdAt: comment.createdAt,
+    );
+
     await _db
         .collection('couples')
         .doc(coupleId)
         .collection('todos')
         .doc(todoId)
         .collection('comments')
-        .add(comment.toMap());
+        .add(encryptedComment.toMap());
     final partnerName = comment.authorName == 'Ray' ? 'aproo' : 'ray';
     FcmService.send(
       partnerName: partnerName,
       title: '🗨️ ${comment.authorName} commented',
-      body: '${comment.text} · $todoTitle',
-      type: 'comment',
+      body: 'New note left on task',
+      type: 'todo',
     );
   }
 
@@ -384,12 +420,13 @@ class FirestoreService {
 
   Future<void> addStickyNote(
       String coupleId, String text, String createdBy, String createdByName, int colorIndex) async {
+    final encryptedText = await CryptoService().encryptString(text);
     await _db
         .collection('couples')
         .doc(coupleId)
         .collection('sticky_notes')
         .add({
-      'text': text,
+      'text': encryptedText,
       'createdBy': createdBy,
       'createdByName': createdByName,
       'colorIndex': colorIndex,

@@ -284,17 +284,19 @@ Tether implements standard zero-trust E2EE using Elliptic Curve Diffie-Hellman (
   * Public keys are stored in Firestore under `/couples/ray-aproo/status/presence` -> `ray.publicKey` / `aproo.publicKey`.
   * Private keys are stored locally using `flutter_secure_storage`.
 * **Shared Secret Derivation**: Derived using `MyPrivateKey + PartnerPublicKey` via ECDH, hashed with SHA-256.
+* **Mandatory Architecture Rule**: **Every new feature added to the app MUST be end-to-end encrypted.** No personal data or user-generated text/media may be saved to Firestore in plain text.
 * **Encrypted Fields**:
-  * Messages: Stored in the `text` field as a serialized JSON string containing:
-    `{"ciphertext": "...", "nonce": "...", "mac": "..."}`
-    (Legacy plaintext messages do not start with `{"ciphertext":` and are loaded directly).
-  * Snaps: Stored in Firestore `quick_snap` photo and caption fields as E2EE JSON strings.
+  * Messages: Stored in the `text` field as E2EE JSON strings.
+  * Snaps: Cropped Base64 photo and caption are stored as E2EE JSON strings.
+  * Todos: Titles, details, and checklist items titles are stored as E2EE JSON strings.
+  * Todo Comments: Comment text is stored as E2EE JSON strings.
+  * Sticky Notes: Note text is stored as E2EE JSON strings.
 * **Key Backup**:
   * Encrypted locally using a derived key from the user's 4-digit PIN (AES-256 + PBKDF2).
   * Saved to Google Drive as `tether_key_backup.json`.
   * Restored transparently during a clean reinstall by asking the user for their PIN.
 * **Push Notifications**:
-  * Because text payloads are encrypted, FCM push notifications are configured to only show `"Sent a message"` or `"📷 New Polaroid Snap!"` to prevent leaking metadata.
+  * Because text payloads are encrypted, FCM push notifications are configured to only show generic text (e.g. `"Sent a message"`, `"New note left on task"`, `"📷 New Polaroid Snap!"`) to prevent leaking metadata.
 
 // Presence / FCM token / location keys (lowercase)
 'ray'   // Ray's key in Firestore presence + fcmTokens + locations
