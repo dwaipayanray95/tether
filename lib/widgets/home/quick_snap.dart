@@ -394,6 +394,12 @@ class _QuickSnapState extends State<QuickSnap> {
   }
 
   Future<Uint8List> _renderPolaroidPNG(Uint8List imageBytes, String caption, DateTime date) async {
+    // Ensure Google Fonts are fully loaded before rendering to canvas
+    await GoogleFonts.pendingFonts([
+      GoogleFonts.caveat(),
+      GoogleFonts.vt323(),
+    ]);
+
     final originalImage = await _loadImage(imageBytes);
 
     final recorder = ui.PictureRecorder();
