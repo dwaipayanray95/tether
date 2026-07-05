@@ -87,13 +87,23 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         return;
       }
 
-      final hasAllScopes = await _auth.googleSignIn.canAccessScopes(_auth.googleSignIn.scopes);
-      if (!hasAllScopes) {
-        LogService.log('Google Sign-In: Missing required API scopes. Logging out to force re-consent.');
-        await _auth.signOut();
+      try {
+        final hasAllScopes = await _auth.googleSignIn.canAccessScopes(_auth.googleSignIn.scopes);
+        if (!hasAllScopes) {
+          LogService.log('Google Sign-In: Missing required API scopes. Logging out to force re-consent.');
+          await _auth.signOut();
+        }
+      } catch (e) {
+        final errStr = e.toString().toLowerCase();
+        if (errStr.contains('unimplemented') || errStr.contains('not implemented') || errStr.contains('notsupported')) {
+          LogService.log('Google Sign-In: canAccessScopes is unimplemented on this platform. Skipping check.');
+        } else {
+          LogService.log('Google Sign-In scope verification failed: $e. Logging out to be safe.');
+          await _auth.signOut();
+        }
       }
     } catch (e) {
-      LogService.log('Google Sign-In scope verification failed: $e. Logging out to be safe.');
+      LogService.log('Outer Google Sign-In scope verification failed: $e. Logging out to be safe.');
       await _auth.signOut();
     }
   }
