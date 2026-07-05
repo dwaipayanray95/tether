@@ -1,7 +1,7 @@
 name: tether
 description: "Tether - Raayyy & Aproo"
 publish_to: 'none'
-version: 1.11.7+58
+version: 2.0.0+60
 
 environment:
   sdk: ^3.11.5
@@ -46,6 +46,8 @@ dependencies:
   permission_handler: ^12.0.1
   scrollable_positioned_list: ^0.3.8
   share_plus: ^12.0.2
+  cryptography: ^2.9.0
+  flutter_secure_storage: ^10.3.1
 
 dev_dependencies:
   flutter_test:

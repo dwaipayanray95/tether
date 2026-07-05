@@ -247,9 +247,14 @@ class FirestoreService {
         .add(message.toMap());
     if (senderName.isNotEmpty) {
       final partnerName = senderName == 'Ray' ? 'aproo' : 'ray';
-      final preview = message.text.length > 60
-          ? '${message.text.substring(0, 60)}…'
-          : message.text;
+      final String preview;
+      if (message.text.startsWith('{"ciphertext":')) {
+        preview = 'Sent a message';
+      } else {
+        preview = message.text.length > 60
+            ? '${message.text.substring(0, 60)}…'
+            : message.text;
+      }
       FcmService.send(
         partnerName: partnerName,
         title: senderName,
@@ -327,6 +332,15 @@ class FirestoreService {
     await _db.doc('couples/ray-aproo/status/presence').set({
       myKey: {
         'lastSeen': FieldValue.serverTimestamp(),
+      }
+    }, SetOptions(merge: true));
+  }
+
+  Future<void> registerPublicKey(String myKey, String publicKeyBase64) async {
+    LogService.log('Registering E2EE public key for $myKey');
+    await _db.doc('couples/ray-aproo/status/presence').set({
+      myKey: {
+        'publicKey': publicKeyBase64,
       }
     }, SetOptions(merge: true));
   }

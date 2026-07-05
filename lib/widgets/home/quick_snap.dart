@@ -11,10 +11,12 @@ import 'package:image_picker/image_picker.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import '../../services/auth_service.dart';
 import '../../services/firestore_service.dart';
+import '../../services/log_service.dart';
 import '../../services/fcm_service.dart';
 import '../../services/local_storage_service.dart';
 import '../../services/google_drive_service.dart';
 import '../../screens/gallery_screen.dart';
+import '../../services/crypto_service.dart';
 import '../../theme/app_theme.dart';
 
 class QuickSnap extends StatefulWidget {
@@ -31,6 +33,91 @@ class _QuickSnapState extends State<QuickSnap> {
   
   bool _isUploading = false;
   late final Stream<DocumentSnapshot<Map<String, dynamic>>> _stream;
+
+  // E2EE Snap decryption state
+  String? _cachedPhotoPayload;
+  Uint8List? _decryptedImageBytes;
+  String _decryptedCaption = '';
+  bool _isDecrypting = false;
+
+  void _decryptSnapIfNeeded(String? photoPayload, String? captionPayload) async {
+    if (photoPayload == null) {
+      if (_cachedPhotoPayload != null) {
+        setState(() {
+          _cachedPhotoPayload = null;
+          _decryptedImageBytes = null;
+          _decryptedCaption = '';
+        });
+      }
+      return;
+    }
+
+    if (photoPayload == _cachedPhotoPayload) return;
+
+    if (!photoPayload.startsWith('{"ciphertext":')) {
+      // Legacy plaintext snap
+      setState(() {
+        _cachedPhotoPayload = photoPayload;
+        try {
+          _decryptedImageBytes = base64Decode(photoPayload);
+        } catch (_) {
+          _decryptedImageBytes = null;
+        }
+        _decryptedCaption = captionPayload ?? '';
+      });
+      return;
+    }
+
+    if (_isDecrypting) return;
+    _isDecrypting = true;
+
+    try {
+      final partnerPubKey = await CryptoService().fetchPartnerPublicKey();
+      if (partnerPubKey == null) {
+        setState(() {
+          _cachedPhotoPayload = photoPayload;
+          _decryptedImageBytes = null;
+          _decryptedCaption = '[E2EE: Key missing]';
+          _isDecrypting = false;
+        });
+        return;
+      }
+
+      final sharedKey = await CryptoService().getSharedKey(partnerPubKey);
+      
+      final encryptedPhotoData = jsonDecode(photoPayload) as Map<String, dynamic>;
+      final decryptedPhotoStr = await CryptoService().decryptText(encryptedPhotoData, sharedKey);
+      final decryptedBytes = base64Decode(decryptedPhotoStr);
+
+      String decryptedCaptionStr = '';
+      if (captionPayload != null && captionPayload.isNotEmpty) {
+        if (captionPayload.startsWith('{"ciphertext":')) {
+          final encryptedCaptionData = jsonDecode(captionPayload) as Map<String, dynamic>;
+          decryptedCaptionStr = await CryptoService().decryptText(encryptedCaptionData, sharedKey);
+        } else {
+          decryptedCaptionStr = captionPayload;
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _cachedPhotoPayload = photoPayload;
+          _decryptedImageBytes = decryptedBytes;
+          _decryptedCaption = decryptedCaptionStr;
+          _isDecrypting = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _cachedPhotoPayload = photoPayload;
+          _decryptedImageBytes = null;
+          _decryptedCaption = '[Decryption failed: $e]';
+          _isDecrypting = false;
+        });
+      }
+    }
+  }
 
   @override
   void initState() {
@@ -136,10 +223,25 @@ class _QuickSnapState extends State<QuickSnap> {
                 
                 try {
                   final originalBytes = await imageFile.readAsBytes();
-                  final base64Photo = base64Encode(originalBytes);
-                  
+                  String base64PhotoToSend = base64Encode(originalBytes);
+                  String captionToSend = caption;
+
+                  try {
+                    final partnerPubKey = await CryptoService().fetchPartnerPublicKey();
+                    if (partnerPubKey != null) {
+                      final sharedKey = await CryptoService().getSharedKey(partnerPubKey);
+                      final encryptedPhotoMap = await CryptoService().encryptText(base64PhotoToSend, sharedKey);
+                      base64PhotoToSend = jsonEncode(encryptedPhotoMap);
+
+                      final encryptedCaptionMap = await CryptoService().encryptText(caption, sharedKey);
+                      captionToSend = jsonEncode(encryptedCaptionMap);
+                    }
+                  } catch (e) {
+                    LogService.log('Crypto Error: Snap encryption failed, falling back to plaintext: $e');
+                  }
+
                   final myKey = _auth.myName.toLowerCase(); // 'ray' or 'aproo'
-                  await _firestore.sendSnap(coupleId, myKey, base64Photo, caption);
+                  await _firestore.sendSnap(coupleId, myKey, base64PhotoToSend, captionToSend);
 
                   final date = DateTime.now();
 
@@ -570,12 +672,10 @@ class _QuickSnapState extends State<QuickSnap> {
         final partnerCaption = data?['${partnerKey}Caption'] as String? ?? '';
         final partnerSentAt = data?['${partnerKey}SentAt'] as Timestamp?;
 
-        Uint8List? partnerImageBytes;
-        if (partnerPhotoBase64 != null) {
-          try {
-            partnerImageBytes = base64Decode(partnerPhotoBase64);
-          } catch (_) {}
-        }
+        _decryptSnapIfNeeded(partnerPhotoBase64, partnerCaption);
+
+        final partnerImageBytes = _decryptedImageBytes;
+        final displayCaption = _decryptedCaption;
 
         return Container(
           width: double.infinity,
@@ -599,8 +699,8 @@ class _QuickSnapState extends State<QuickSnap> {
                   Positioned.fill(
                     child: GestureDetector(
                       onTap: () => _showFullScreenViewer(
-                        partnerImageBytes!,
-                        partnerCaption,
+                        partnerImageBytes,
+                        displayCaption,
                         partnerSentAt.toDate(),
                         'Snap from $partnerName',
                       ),
@@ -616,28 +716,25 @@ class _QuickSnapState extends State<QuickSnap> {
                                   fit: BoxFit.cover,
                                 ),
                               ),
-                              // Live handwritten timestamp stamp on home screen card image
                               Positioned(
                                 bottom: 8,
                                 right: 8,
                                 child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 4),
                                   decoration: BoxDecoration(
-                                    color: Colors.black45,
+                                    color: Colors.black54,
                                     borderRadius: BorderRadius.circular(8),
                                   ),
-                                  child: Builder(
-                                    builder: (context) {
-                                      final timeAgoStr = timeago.format(partnerSentAt.toDate(), locale: 'en_short');
-                                      return Text(
-                                        timeAgoStr == 'now' ? 'now' : '$timeAgoStr ago',
-                                        style: GoogleFonts.dmSans(
-                                          color: Colors.white,
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      );
-                                    }
+                                  child: Text(
+                                    timeago.format(partnerSentAt.toDate(), locale: 'en_short') == 'now'
+                                        ? 'now'
+                                        : '${timeago.format(partnerSentAt.toDate(), locale: 'en_short')} ago',
+                                    style: GoogleFonts.dmSans(
+                                      color: Colors.white,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                    ),
                                   ),
                                 ),
                               ),

@@ -274,6 +274,28 @@ AuthService().myDisplayName    // display-friendly name
 AuthService().partnerName      // opposite of myName
 AuthService().partnerDisplayName
 
+---
+
+## End-to-End Encryption (E2EE) Rules
+
+Tether implements standard zero-trust E2EE using Elliptic Curve Diffie-Hellman (ECDH) key exchange and AES-GCM (256-bit) symmetric encryption.
+
+* **Key Exchange (X25519)**: Devices generate keys on first launch.
+  * Public keys are stored in Firestore under `/couples/ray-aproo/status/presence` -> `ray.publicKey` / `aproo.publicKey`.
+  * Private keys are stored locally using `flutter_secure_storage`.
+* **Shared Secret Derivation**: Derived using `MyPrivateKey + PartnerPublicKey` via ECDH, hashed with SHA-256.
+* **Encrypted Fields**:
+  * Messages: Stored in the `text` field as a serialized JSON string containing:
+    `{"ciphertext": "...", "nonce": "...", "mac": "..."}`
+    (Legacy plaintext messages do not start with `{"ciphertext":` and are loaded directly).
+  * Snaps: Stored in Firestore `quick_snap` photo and caption fields as E2EE JSON strings.
+* **Key Backup**:
+  * Encrypted locally using a derived key from the user's 4-digit PIN (AES-256 + PBKDF2).
+  * Saved to Google Drive as `tether_key_backup.json`.
+  * Restored transparently during a clean reinstall by asking the user for their PIN.
+* **Push Notifications**:
+  * Because text payloads are encrypted, FCM push notifications are configured to only show `"Sent a message"` or `"📷 New Polaroid Snap!"` to prevent leaking metadata.
+
 // Presence / FCM token / location keys (lowercase)
 'ray'   // Ray's key in Firestore presence + fcmTokens + locations
 'aproo' // Aproo's key

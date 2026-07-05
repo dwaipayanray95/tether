@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:math' show max;
 import 'dart:io';
+import 'dart:convert';
+import '../services/crypto_service.dart';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -77,6 +79,71 @@ class ChatScreenState extends State<ChatScreen> {
 
   // Reply
   Message? _replyTo;
+
+  // E2EE decryption cache
+  final Map<String, String> _decryptedTextCache = {};
+
+  String _getOrDecryptText(Message message) {
+    if (!message.text.startsWith('{"ciphertext":')) {
+      return message.text;
+    }
+    if (_decryptedTextCache.containsKey(message.id)) {
+      return _decryptedTextCache[message.id]!;
+    }
+    _decryptMessageInBackground(message);
+    return '...';
+  }
+
+  Future<void> _decryptMessageInBackground(Message message) async {
+    try {
+      final partnerPubKey = await CryptoService().fetchPartnerPublicKey();
+      if (partnerPubKey == null) {
+        if (mounted) {
+          setState(() {
+            _decryptedTextCache[message.id] = message.text; // Fallback to raw text if no key found yet
+          });
+        }
+        return;
+      }
+      final sharedKey = await CryptoService().getSharedKey(partnerPubKey);
+      final encryptedData = jsonDecode(message.text) as Map<String, dynamic>;
+      final decrypted = await CryptoService().decryptText(encryptedData, sharedKey);
+      if (mounted) {
+        setState(() {
+          _decryptedTextCache[message.id] = decrypted;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _decryptedTextCache[message.id] = '[Decryption failed: $e]';
+        });
+      }
+    }
+  }
+
+  String? _getOrDecryptReplyText(Message message) {
+    if (message.replyToText == null) return null;
+    if (!message.replyToText!.startsWith('{"ciphertext":')) {
+      return message.replyToText;
+    }
+    final replyId = message.replyToId;
+    if (replyId == null) return '...';
+
+    if (_decryptedTextCache.containsKey(replyId)) {
+      return _decryptedTextCache[replyId]!;
+    }
+
+    final dummyReplyMsg = Message(
+      id: replyId,
+      senderId: '',
+      text: message.replyToText!,
+      type: MessageType.text,
+      sentAt: DateTime.now(),
+    );
+    _decryptMessageInBackground(dummyReplyMsg);
+    return '...';
+  }
 
   // Search
   bool _searchActive = false;
@@ -233,17 +300,38 @@ class ChatScreenState extends State<ChatScreen> {
     final reply = _replyTo;
     _textCtrl.clear();
     _clearReply();
+
+    String textToSend = text;
+    String? replyTextToSend = reply?.text;
+
+    try {
+      final partnerPubKey = await CryptoService().fetchPartnerPublicKey();
+      if (partnerPubKey != null) {
+        final sharedKey = await CryptoService().getSharedKey(partnerPubKey);
+        final encryptedTextMap = await CryptoService().encryptText(text, sharedKey);
+        textToSend = jsonEncode(encryptedTextMap);
+
+        if (reply != null) {
+          final plainReplyText = _getOrDecryptText(reply);
+          final encryptedReplyMap = await CryptoService().encryptText(plainReplyText, sharedKey);
+          replyTextToSend = jsonEncode(encryptedReplyMap);
+        }
+      }
+    } catch (e) {
+      LogService.log('Crypto Error: Encryption failed during send, falling back to plaintext: $e');
+    }
+
     await _firestore.sendMessage(
       _coupleId,
       Message(
         id: const Uuid().v4(),
         senderId: _myUid,
-        text: text,
+        text: textToSend,
         type: MessageType.text,
         sentAt: DateTime.now(),
         readBy: [_myUid],
         replyToId: reply?.id,
-        replyToText: reply?.text,
+        replyToText: replyTextToSend,
       ),
       senderName: _auth.myName,
     );
@@ -505,6 +593,8 @@ class ChatScreenState extends State<ChatScreen> {
             onReply: () => _setReply(msg),
             child: _MessageBubble(
               message: msg,
+              displayText: _getOrDecryptText(msg),
+              replyToDisplayText: _getOrDecryptReplyText(msg),
               isMe: msg.senderId == _myUid,
               showReceipt: i == 0 && msg.senderId == _myUid,
               myUid: _myUid,
@@ -774,6 +864,8 @@ class _SwipeableMessageState extends State<_SwipeableMessage> with SingleTickerP
 
 class _MessageBubble extends StatelessWidget {
   final Message message;
+  final String displayText;
+  final String? replyToDisplayText;
   final bool isMe;
   final bool showReceipt;
   final String myUid;
@@ -784,6 +876,8 @@ class _MessageBubble extends StatelessWidget {
 
   const _MessageBubble({
     required this.message,
+    required this.displayText,
+    this.replyToDisplayText,
     required this.isMe,
     required this.showReceipt,
     required this.myUid,
@@ -989,7 +1083,7 @@ class _MessageBubble extends StatelessWidget {
         .map((e) => e.value)
         .firstOrNull;
     final hasReactions = message.reactions.isNotEmpty;
-    final isEmojiOnly = _isEmojiOnly(message.text);
+    final isEmojiOnly = _isEmojiOnly(displayText);
 
     final isImage = message.type == MessageType.image;
 
@@ -1053,7 +1147,7 @@ class _MessageBubble extends StatelessWidget {
                           : CrossAxisAlignment.start,
                       children: [
                         // Reply preview — tappable to scroll to original
-                        if (message.replyToText != null)
+                        if (replyToDisplayText != null)
                           GestureDetector(
                             onTap: onReplyTap,
                             child: Container(
@@ -1087,7 +1181,7 @@ class _MessageBubble extends StatelessWidget {
                                   const SizedBox(width: 6),
                                   Flexible(
                                     child: Text(
-                                      message.replyToText!,
+                                      replyToDisplayText!,
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: TextStyle(
@@ -1105,7 +1199,7 @@ class _MessageBubble extends StatelessWidget {
                         if (isImage)
                           _buildImageMessage(context)
                         else ...[
-                          _buildMessageText(message.text, isMe, isEmojiOnly: isEmojiOnly),
+                          _buildMessageText(displayText, isMe, isEmojiOnly: isEmojiOnly),
                           // ── Timestamp + receipt inside the bubble ──────────
                           const SizedBox(height: 4),
                           Align(

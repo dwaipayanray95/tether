@@ -8,6 +8,13 @@ These are the core hardcoded constants, credentials, helper guidelines, styling 
 - **Couple Identifier:** `EnvConfig.coupleId` (`'ray-aproo'`) — shared ID for Firestore collections.
 - **Authorized Emails:** `EnvConfig.allowedEmails` (`['ray@redacted.invalid', 'aproo@redacted.invalid']`).
 
+## End-to-End Encryption (E2EE)
+
+- **Cryptography:** AES-GCM (256-bit) and X25519 Elliptic Curve Diffie-Hellman (ECDH) key exchange.
+- **Keys Storage:** Private keys are saved locally in Secure Storage (`flutter_secure_storage`). Public keys are published to `/couples/ray-aproo/status/presence` doc under `${userKey}.publicKey`.
+- **Key Recovery:** Encrypted locally using a PBKDF2 derived key from the user's 4-digit PIN, and uploaded to Google Drive as `tether_key_backup.json`.
+- **Encrypted Payloads:** Messages and snap media captions/photos are stored as base64 JSON objects beginning with `{"ciphertext":` if encrypted.
+
 ## Auth & Name Mapping
 
 - `AuthService().isRay` - returns `true` if current user is Ray.

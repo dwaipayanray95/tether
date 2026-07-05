@@ -231,4 +231,102 @@ class GoogleDriveService {
     }
     return null;
   }
+
+  Future<void> backupKeyBackup(Map<String, dynamic> keyData) async {
+    try {
+      LogService.log('Google Drive: Backing up encrypted E2EE key payload');
+      final token = await _getAccessToken();
+      final parentId = await _getOrCreateFolder(token, 'Tether');
+      
+      final searchResponse = await _dio.get(
+        'https://www.googleapis.com/drive/v3/files',
+        queryParameters: {
+          'q': "name = 'tether_key_backup.json' and '$parentId' in parents and trashed = false",
+          'fields': 'files(id)',
+        },
+        options: Options(headers: {'Authorization': 'Bearer $token'}),
+      );
+
+      final files = searchResponse.data['files'] as List?;
+      final jsonContent = jsonEncode(keyData);
+      final jsonBytes = utf8.encode(jsonContent);
+
+      if (files != null && files.isNotEmpty) {
+        final fileId = files.first['id'] as String;
+        await _dio.patch(
+          'https://www.googleapis.com/upload/drive/v3/files/$fileId?uploadType=media',
+          data: Stream.fromIterable([jsonBytes]),
+          options: Options(headers: {
+            'Authorization': 'Bearer $token',
+            'Content-Type': 'application/json',
+            'Content-Length': jsonBytes.length.toString(),
+          }),
+        );
+      } else {
+        final metadata = jsonEncode({
+          'name': 'tether_key_backup.json',
+          'parents': [parentId],
+        });
+
+        const boundary = 'tether_boundary';
+        final header = '\r\n--$boundary\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n$metadata\r\n--$boundary\r\nContent-Type: application/json\r\n\r\n';
+        const footer = '\r\n--$boundary--\r\n';
+
+        final bodyBytes = [
+          ...utf8.encode(header),
+          ...jsonBytes,
+          ...utf8.encode(footer),
+        ];
+
+        await _dio.post(
+          'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
+          data: Stream.fromIterable([bodyBytes]),
+          options: Options(
+            headers: {
+              'Authorization': 'Bearer $token',
+              'Content-Type': 'multipart/related; boundary=$boundary',
+              'Content-Length': bodyBytes.length.toString(),
+            },
+          ),
+        );
+      }
+      LogService.log('Google Drive: E2EE Key backup completed');
+    } catch (e) {
+      LogService.log('Google Drive Error: E2EE Key backup failed: $e');
+    }
+  }
+
+  Future<Map<String, dynamic>?> restoreKeyBackup() async {
+    try {
+      LogService.log('Google Drive: Checking for E2EE key backup');
+      final token = await _getAccessToken();
+      final parentId = await _getOrCreateFolder(token, 'Tether');
+
+      final searchResponse = await _dio.get(
+        'https://www.googleapis.com/drive/v3/files',
+        queryParameters: {
+          'q': "name = 'tether_key_backup.json' and '$parentId' in parents and trashed = false",
+          'fields': 'files(id)',
+        },
+        options: Options(headers: {'Authorization': 'Bearer $token'}),
+      );
+
+      final files = searchResponse.data['files'] as List?;
+      if (files != null && files.isNotEmpty) {
+        final fileId = files.first['id'] as String;
+        final downloadResponse = await _dio.get(
+          'https://www.googleapis.com/drive/v3/files/$fileId?alt=media',
+          options: Options(
+            headers: {'Authorization': 'Bearer $token'},
+            responseType: ResponseType.json,
+          ),
+        );
+        LogService.log('Google Drive: E2EE Key backup found and loaded');
+        return downloadResponse.data as Map<String, dynamic>?;
+      }
+    } catch (e) {
+      LogService.log('Google Drive Error: E2EE Key restore failed: $e');
+    }
+    return null;
+  }
 }

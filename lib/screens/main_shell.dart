@@ -15,6 +15,7 @@ import '../services/notification_service.dart';
 import '../services/auth_service.dart';
 import '../services/log_service.dart';
 import '../services/google_drive_service.dart';
+import '../services/crypto_service.dart';
 import '../config/env_config.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -62,6 +63,8 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       _requestAllPermissions();
       // Restore user preferences backup from Google Drive
       await _restorePrefsFromCloud();
+      // Ensure E2EE is set up and key is backed up
+      await _checkE2EESetup();
     });
   }
 
@@ -399,6 +402,172 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
               );
             },
           ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _checkE2EESetup() async {
+    final myPubKey = await CryptoService().getPublicKey();
+    if (myPubKey != null) {
+      // Sync public key just in case it is missing on Firestore
+      await _firestore.registerPublicKey(_myPresenceKey, myPubKey);
+      return;
+    }
+
+    if (!mounted) return;
+
+    // Show a loading dialog while checking Google Drive backup
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: Card(
+          child: Padding(
+            padding: EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(color: AppTheme.primary),
+                SizedBox(height: 16),
+                Text('Checking for encryption keys backup...'),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final backup = await GoogleDriveService().restoreKeyBackup();
+    if (!mounted) return;
+    Navigator.pop(context); // Dismiss loading dialog
+
+    if (backup != null) {
+      _showRestoreE2EEDialog(backup);
+    } else {
+      _showCreateE2EEDialog();
+    }
+  }
+
+  void _showRestoreE2EEDialog(Map<String, dynamic> backup) {
+    final pinCtrl = TextEditingController();
+    String? error;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          title: Text('Restore Encryption Keys', style: GoogleFonts.playfairDisplay(fontWeight: FontWeight.bold)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('An encryption backup was found on Google Drive. Enter your 4-digit E2EE PIN to restore it:'),
+              const SizedBox(height: 16),
+              TextField(
+                controller: pinCtrl,
+                keyboardType: TextInputType.number,
+                obscureText: true,
+                maxLength: 4,
+                decoration: InputDecoration(
+                  labelText: '4-Digit PIN',
+                  errorText: error,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () async {
+                final pin = pinCtrl.text.trim();
+                if (pin.length != 4) {
+                  setDialogState(() => error = 'PIN must be exactly 4 digits');
+                  return;
+                }
+                try {
+                  final decryptedPrivateKey = await CryptoService().decryptPrivateKey(pin, backup);
+                  final publicKey = backup['publicKey'] as String;
+
+                  // Restore keys locally
+                  await CryptoService().restoreKeys(publicKey, decryptedPrivateKey);
+                  // Register public key to Firestore
+                  await _firestore.registerPublicKey(_myPresenceKey, publicKey);
+
+                  if (ctx.mounted) Navigator.pop(ctx);
+                } catch (e) {
+                  setDialogState(() => error = 'Incorrect PIN. Try again.');
+                }
+              },
+              child: const Text('Restore'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showCreateE2EEDialog() {
+    final pinCtrl = TextEditingController();
+    String? error;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          title: Text('Secure Your Chats (E2EE)', style: GoogleFonts.playfairDisplay(fontWeight: FontWeight.bold)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Create a 4-digit PIN to encrypt and back up your keys to Google Drive. You will need this PIN if you reinstall the app.'),
+              const SizedBox(height: 16),
+              TextField(
+                controller: pinCtrl,
+                keyboardType: TextInputType.number,
+                obscureText: true,
+                maxLength: 4,
+                decoration: InputDecoration(
+                  labelText: 'Create 4-Digit PIN',
+                  errorText: error,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () async {
+                final pin = pinCtrl.text.trim();
+                if (pin.length != 4) {
+                  setDialogState(() => error = 'PIN must be exactly 4 digits');
+                  return;
+                }
+                try {
+                  // Generate new keypair
+                  final publicKey = await CryptoService().initializeKeys();
+                  final privateKey = await CryptoService().getPrivateKey();
+
+                  if (privateKey != null) {
+                    // Encrypt and backup private key
+                    final encryptedBackup = await CryptoService().encryptPrivateKey(pin, privateKey);
+                    encryptedBackup['publicKey'] = publicKey; // Save public key alongside backup
+                    await GoogleDriveService().backupKeyBackup(encryptedBackup);
+                  }
+
+                  // Register public key to Firestore
+                  await _firestore.registerPublicKey(_myPresenceKey, publicKey);
+
+                  if (ctx.mounted) Navigator.pop(ctx);
+                } catch (e) {
+                  setDialogState(() => error = 'Setup failed: $e');
+                }
+              },
+              child: const Text('Set Up'),
+            ),
+          ],
         ),
       ),
     );
