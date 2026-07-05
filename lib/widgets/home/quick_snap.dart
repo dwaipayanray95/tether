@@ -434,18 +434,13 @@ class _QuickSnapState extends State<QuickSnap> {
 
     // 4. Draw Date/Time digital LCD stamp on bottom-right of photo
     final dateString = DateFormat("ddMMMyy  HH:mm").format(date).toUpperCase();
-    final dateStyle = GoogleFonts.orbitron(
-      color: const Color(0xFFFF3D00), // Vibrant neon camera red-orange
-      fontSize: 22,
-      fontWeight: FontWeight.bold,
+    final dateStyle = GoogleFonts.vt323(
+      color: const Color(0xFFFF7043),
+      fontSize: 36,
       shadows: [
-        const Shadow(
-          color: Color(0xFFFF3D00),
+        Shadow(
+          color: const Color(0xFFFF7043).withValues(alpha: 0.5),
           blurRadius: 2,
-        ),
-        const Shadow(
-          color: Color(0xFFFF3D00),
-          blurRadius: 8,
         ),
       ],
     );
@@ -593,17 +588,12 @@ class _QuickSnapState extends State<QuickSnap> {
                               child: Text(
                                 DateFormat('ddMMMyy  HH:mm').format(date).toUpperCase(),
                                 style: GoogleFonts.vt323(
-                                  color: const Color(0xFFFF3D00),
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
+                                  color: const Color(0xFFFF7043),
+                                  fontSize: 16,
                                   shadows: [
                                     Shadow(
-                                      color: const Color(0xFFFF3D00).withValues(alpha: 0.9),
+                                      color: const Color(0xFFFF7043).withValues(alpha: 0.5),
                                       blurRadius: 1,
-                                    ),
-                                    Shadow(
-                                      color: const Color(0xFFFF3D00).withValues(alpha: 0.6),
-                                      blurRadius: 6,
                                     ),
                                   ],
                                 ),

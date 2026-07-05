@@ -2,7 +2,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
 import '../services/local_storage_service.dart';
 import '../theme/app_theme.dart';
@@ -134,78 +133,13 @@ class _GalleryScreenState extends State<GalleryScreen> {
           child: InteractiveViewer(
             minScale: 0.5,
             maxScale: 3.5,
-            child: AspectRatio(
-              aspectRatio: 1080 / 1350,
-              child: Container(
-                margin: const EdgeInsets.symmetric(horizontal: 24),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(8),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.3),
-                      blurRadius: 20,
-                    ),
-                  ],
-                ),
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  children: [
-                    Expanded(
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(4),
-                        child: Stack(
-                          children: [
-                            Positioned.fill(
-                              child: Image.file(
-                                File(snap.imagePath),
-                                fit: BoxFit.cover,
-                              ),
-                            ),
-                            Positioned(
-                              bottom: 8,
-                              right: 8,
-                              child: Text(
-                                DateFormat('ddMMMyy  HH:mm').format(snap.date).toUpperCase(),
-                                style: GoogleFonts.vt323(
-                                  color: const Color(0xFFFF3D00),
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
-                                  shadows: [
-                                    Shadow(
-                                      color: const Color(0xFFFF3D00).withValues(alpha: 0.9),
-                                      blurRadius: 1,
-                                    ),
-                                    Shadow(
-                                      color: const Color(0xFFFF3D00).withValues(alpha: 0.6),
-                                      blurRadius: 6,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      height: 80,
-                      child: Center(
-                        child: Text(
-                          snap.caption.isNotEmpty ? snap.caption : 'Memory...',
-                          style: GoogleFonts.caveat(
-                            color: const Color(0xFF2D2D2D),
-                            fontSize: 32,
-                            fontWeight: FontWeight.bold,
-                          ),
-                          textAlign: TextAlign.center,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ),
-                  ],
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Image.file(
+                  File(snap.imagePath),
+                  fit: BoxFit.contain,
                 ),
               ),
             ),
@@ -272,42 +206,21 @@ class _GalleryScreenState extends State<GalleryScreen> {
                       onTap: () => _viewSnapDetails(snap),
                       child: Container(
                         decoration: BoxDecoration(
-                          color: Colors.white,
                           borderRadius: BorderRadius.circular(12),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.04),
+                              color: Colors.black.withValues(alpha: 0.08),
                               blurRadius: 10,
                               offset: const Offset(0, 4),
                             ),
                           ],
                         ),
-                        padding: const EdgeInsets.all(8),
-                        child: Column(
-                          children: [
-                            Expanded(
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(8),
-                                child: Image.file(
-                                  File(snap.imagePath),
-                                  fit: BoxFit.cover,
-                                  width: double.infinity,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              snap.caption.isNotEmpty ? snap.caption : 'Memory',
-                              style: GoogleFonts.caveat(
-                                color: AppTheme.textDark,
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              textAlign: TextAlign.center,
-                            ),
-                          ],
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: Image.file(
+                            File(snap.imagePath),
+                            fit: BoxFit.cover,
+                          ),
                         ),
                       ),
                     );
