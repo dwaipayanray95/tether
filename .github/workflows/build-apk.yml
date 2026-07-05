@@ -85,20 +85,33 @@ jobs:
           path: build/app/outputs/flutter-apk/Tether_${{ github.ref_name }}.apk
           if-no-files-found: error
 
-      - name: Build Changelog
+      - name: Generate Custom Git Changelog
         if: startsWith(github.ref, 'refs/tags/v')
-        id: build_changelog
-        uses: mikepenz/release-changelog-builder-action@v5
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Ensure git history and tags are fetched
+          git fetch --tags --unshallow || git fetch --tags || true
+          
+          # Get previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          
+          echo "### 🚀 What's New" > changelog.md
+          if [ -z "$PREV_TAG" ]; then
+            echo "First release tag." >> changelog.md
+            echo "" >> changelog.md
+            git log --pretty=format:"* %s (%h)" HEAD >> changelog.md
+          else
+            echo "Changes since tag **$PREV_TAG**:" >> changelog.md
+            echo "" >> changelog.md
+            git log --pretty=format:"* %s (%h)" ${PREV_TAG}..HEAD >> changelog.md
+          fi
 
-      - name: Create GitHub Release Draft
+      - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: build/app/outputs/flutter-apk/Tether_${{ github.ref_name }}.apk
-          draft: true
+          draft: false
           prerelease: false
-          body: ${{ steps.build_changelog.outputs.changelog }}
+          body_path: changelog.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
