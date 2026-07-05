@@ -374,7 +374,10 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
           });
         },
       ),
-      ChatScreen(key: _chatKey),
+      ChatScreen(
+        key: _chatKey,
+        isActive: _currentIndex == 1,
+      ),
       const TodoScreen(),
     ];
 

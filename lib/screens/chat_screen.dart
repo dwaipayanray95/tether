@@ -46,9 +46,10 @@ int _countEmojis(String text) {
 }
 
 class ChatScreen extends StatefulWidget {
+  final bool isActive;
   final void Function(int)? onNavigate;
 
-  const ChatScreen({super.key, this.onNavigate});
+  const ChatScreen({super.key, required this.isActive, this.onNavigate});
 
   @override
   State<ChatScreen> createState() => ChatScreenState();
@@ -161,9 +162,20 @@ class ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
-    NotificationService.chatIsOpen = true;
+    NotificationService.chatIsOpen = widget.isActive;
     _loadInitialMessages();
     _itemPositionsListener.itemPositions.addListener(_onPositionsChanged);
+  }
+
+  @override
+  void didUpdateWidget(ChatScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isActive != oldWidget.isActive) {
+      NotificationService.chatIsOpen = widget.isActive;
+      if (widget.isActive) {
+        _firestore.markMessagesRead(_coupleId, _myUid);
+      }
+    }
   }
 
   @override
@@ -187,7 +199,9 @@ class ChatScreenState extends State<ChatScreen> {
       _hasMore = result.messages.length == 50;
       _initialLoading = false;
     });
-    _firestore.markMessagesRead(_coupleId, _myUid);
+    if (widget.isActive) {
+      _firestore.markMessagesRead(_coupleId, _myUid);
+    }
 
     // Real-time stream for new messages + live updates (reactions, readBy)
     _streamSub = _firestore.messageStream(_coupleId).listen(_onStreamUpdate);
@@ -206,7 +220,9 @@ class ChatScreenState extends State<ChatScreen> {
       final updated = _messages.map((m) => streamMap[m.id] ?? m).toList();
       _messages = [...newOnes, ...updated];
     });
-    _firestore.markMessagesRead(_coupleId, _myUid);
+    if (widget.isActive) {
+      _firestore.markMessagesRead(_coupleId, _myUid);
+    }
   }
 
   void _onPositionsChanged() {
@@ -661,7 +677,7 @@ class ChatScreenState extends State<ChatScreen> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      _replyTo!.text,
+                      _getOrDecryptText(_replyTo!),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
