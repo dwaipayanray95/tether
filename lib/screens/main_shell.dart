@@ -55,6 +55,8 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     _updateBatteryStatus();
     _batteryTimer = Timer.periodic(const Duration(minutes: 5), (_) => _updateBatteryStatus());
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      // Validate Google API scopes, auto log out if new scopes are missing
+      await _validateGoogleScopes();
       // Handle notification-triggered navigation on cold start
       _handlePendingNotification();
       // Check for update on launch
@@ -66,6 +68,34 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       // Ensure E2EE is set up and key is backed up
       await _checkE2EESetup();
     });
+  }
+
+  Future<void> _validateGoogleScopes() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+
+      final isGoogleUser = user.providerData.any((p) => p.providerId == 'google.com');
+      if (!isGoogleUser) return;
+
+      final googleUser = _auth.googleSignIn.currentUser ??
+          await _auth.googleSignIn.signInSilently();
+
+      if (googleUser == null) {
+        LogService.log('Google Sign-In user not available on scope check. Logging out.');
+        await _auth.signOut();
+        return;
+      }
+
+      final hasAllScopes = await _auth.googleSignIn.canAccessScopes(_auth.googleSignIn.scopes);
+      if (!hasAllScopes) {
+        LogService.log('Google Sign-In: Missing required API scopes. Logging out to force re-consent.');
+        await _auth.signOut();
+      }
+    } catch (e) {
+      LogService.log('Google Sign-In scope verification failed: $e. Logging out to be safe.');
+      await _auth.signOut();
+    }
   }
 
   Future<void> _updateBatteryStatus() async {

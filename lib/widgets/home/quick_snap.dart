@@ -465,7 +465,7 @@ class _QuickSnapState extends State<QuickSnap> {
     if (caption.isNotEmpty) {
       final captionStyle = GoogleFonts.caveat(
         color: const Color(0xFF2D2D2D),
-        fontSize: 56,
+        fontSize: 112,
         fontWeight: FontWeight.bold,
       );
       final captionSpan = TextSpan(text: caption, style: captionStyle);
@@ -477,7 +477,7 @@ class _QuickSnapState extends State<QuickSnap> {
       captionPainter.layout(maxWidth: 960);
       
       final cx = (1080 - captionPainter.width) / 2;
-      final cy = 1080 + (270 - captionPainter.height) / 2;
+      final cy = 1020 + (330 - captionPainter.height) / 2;
       captionPainter.paint(canvas, Offset(cx, cy));
     }
 
@@ -574,10 +574,11 @@ class _QuickSnapState extends State<QuickSnap> {
                     ),
                   ],
                 ),
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
                 child: Column(
                   children: [
-                    Expanded(
+                    AspectRatio(
+                      aspectRatio: 1.0,
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(4),
                         child: Stack(
@@ -609,9 +610,7 @@ class _QuickSnapState extends State<QuickSnap> {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      height: 80,
+                    Expanded(
                       child: Center(
                         child: Text(
                           caption,
