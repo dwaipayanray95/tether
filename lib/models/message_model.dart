@@ -1,4 +1,4 @@
-enum MessageType { text, image, poke }
+enum MessageType { text, image, poke, voice }
 
 class Message {
   final String id;
@@ -6,6 +6,8 @@ class Message {
   final String text;
   final MessageType type;
   final String? imageUrl;
+  final String? audioUrl;
+  final int? duration; // duration in seconds
   final DateTime sentAt;
   final List<String> readBy;
   final Map<String, DateTime> readTimes;
@@ -19,6 +21,8 @@ class Message {
     required this.text,
     required this.type,
     this.imageUrl,
+    this.audioUrl,
+    this.duration,
     required this.sentAt,
     this.readBy = const [],
     this.readTimes = const {},
@@ -44,6 +48,8 @@ class Message {
       text: map['text'] as String? ?? '',
       type: MessageType.values.byName(map['type'] as String? ?? 'text'),
       imageUrl: map['imageUrl'] as String?,
+      audioUrl: map['audioUrl'] as String?,
+      duration: map['duration'] as int?,
       sentAt: DateTime.parse(map['sentAt'] as String),
       readBy: List<String>.from(map['readBy'] as List? ?? []),
       readTimes: readTimes,
@@ -58,6 +64,8 @@ class Message {
         'text': text,
         'type': type.name,
         'imageUrl': imageUrl,
+        'audioUrl': audioUrl,
+        'duration': duration,
         'sentAt': sentAt.toIso8601String(),
         'readBy': readBy,
         if (readTimes.isNotEmpty)

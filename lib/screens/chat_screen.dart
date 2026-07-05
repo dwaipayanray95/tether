@@ -3,6 +3,10 @@ import 'dart:math' show max;
 import 'dart:io';
 import 'dart:convert';
 import '../services/crypto_service.dart';
+import '../services/voice_service.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:flutter_sound/flutter_sound.dart';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -80,6 +84,13 @@ class ChatScreenState extends State<ChatScreen> {
 
   // Reply
   Message? _replyTo;
+
+  // Voice Recording state
+  bool _isRecording = false;
+  int _recordingDuration = 0;
+  Timer? _recordingTimer;
+  String? _recordingPath;
+  bool _isSendingVoice = false;
 
   // E2EE decryption cache
   final Map<String, String> _decryptedTextCache = {};
@@ -165,6 +176,9 @@ class ChatScreenState extends State<ChatScreen> {
     NotificationService.chatIsOpen = widget.isActive;
     _loadInitialMessages();
     _itemPositionsListener.itemPositions.addListener(_onPositionsChanged);
+    _textCtrl.addListener(() {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
@@ -182,6 +196,8 @@ class ChatScreenState extends State<ChatScreen> {
   void dispose() {
     NotificationService.chatIsOpen = false;
     _streamSub?.cancel();
+    _recordingTimer?.cancel();
+    VoiceService().disposeRecorder();
     _itemPositionsListener.itemPositions.removeListener(_onPositionsChanged);
     _textCtrl.dispose();
     _searchCtrl.dispose();
@@ -363,6 +379,105 @@ class ChatScreenState extends State<ChatScreen> {
     );
     final myKey = _auth.isRay ? 'ray' : 'aproo';
     await _firestore.updatePresence(myKey);
+  }
+
+  Future<void> _startRecording() async {
+    try {
+      final granted = await Permission.microphone.request();
+      if (!granted.isGranted) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Microphone permission required for voice notes.')),
+          );
+        }
+        return;
+      }
+
+      final tempDir = await getTemporaryDirectory();
+      _recordingPath = '${tempDir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.ogg';
+      
+      await VoiceService().startRecording(_recordingPath!);
+      setState(() {
+        _isRecording = true;
+        _recordingDuration = 0;
+      });
+      _recordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        setState(() {
+          _recordingDuration++;
+        });
+      });
+    } catch (e) {
+      LogService.log('Error starting recording: $e');
+    }
+  }
+
+  Future<void> _stopAndSendRecording() async {
+    _recordingTimer?.cancel();
+    final path = await VoiceService().stopRecording();
+    setState(() => _isRecording = false);
+
+    if (path == null || _recordingDuration < 1) {
+      LogService.log('Recording too short or null. Discarding.');
+      return;
+    }
+
+    setState(() => _isSendingVoice = true);
+
+    try {
+      final partnerPubKey = await CryptoService().fetchPartnerPublicKey();
+      if (partnerPubKey != null) {
+        final sharedKey = await CryptoService().getSharedKey(partnerPubKey);
+        final encryptedVoiceJson = await VoiceService().encryptVoice(path, sharedKey);
+        
+        if (encryptedVoiceJson != null) {
+          final encryptedTextMap = await CryptoService().encryptText('[Voice Message]', sharedKey);
+          final textToSend = jsonEncode(encryptedTextMap);
+
+          await _firestore.sendMessage(
+            _coupleId,
+            Message(
+              id: const Uuid().v4(),
+              senderId: _myUid,
+              text: textToSend,
+              type: MessageType.voice,
+              audioUrl: encryptedVoiceJson,
+              duration: _recordingDuration,
+              sentAt: DateTime.now(),
+              readBy: [_myUid],
+            ),
+            senderName: _auth.myName,
+          );
+          
+          final myKey = _auth.isRay ? 'ray' : 'aproo';
+          await _firestore.updatePresence(myKey);
+        }
+      }
+    } catch (e) {
+      LogService.log('Error uploading or sending voice message: $e');
+    } finally {
+      setState(() => _isSendingVoice = false);
+    }
+  }
+
+  Future<void> _cancelRecording() async {
+    _recordingTimer?.cancel();
+    await VoiceService().stopRecording();
+    setState(() {
+      _isRecording = false;
+      _recordingDuration = 0;
+    });
+    if (_recordingPath != null) {
+      final file = File(_recordingPath!);
+      if (await file.exists()) {
+        await file.delete();
+      }
+    }
+  }
+
+  String _formatDuration(int seconds) {
+    final m = seconds ~/ 60;
+    final s = seconds % 60;
+    return '$m:${s.toString().padLeft(2, '0')}';
   }
 
 
@@ -700,60 +815,109 @@ class ChatScreenState extends State<ChatScreen> {
               ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _textCtrl,
-                      minLines: 1,
-                      maxLines: 6,
-                      style: const TextStyle(fontSize: 15),
-                      decoration: InputDecoration(
-                        hintText: 'Message...',
-                        hintStyle: const TextStyle(color: AppTheme.textMuted),
-                        filled: true,
-                        fillColor: const Color(0xFFF3EFEF),
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 18, vertical: 11),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24),
-                          borderSide: BorderSide.none,
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24),
-                          borderSide: BorderSide.none,
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24),
-                          borderSide: const BorderSide(color: AppTheme.primary, width: 1.0),
-                        ),
+              child: _isSendingVoice
+                  ? const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(8.0),
+                        child: CircularProgressIndicator(color: AppTheme.primary),
                       ),
-                      textCapitalization: TextCapitalization.sentences,
-                      onSubmitted: (_) => _send(),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  GestureDetector(
-                    onTap: _send,
-                    child: Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: AppTheme.primary,
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppTheme.primary.withValues(alpha: 0.25),
-                            blurRadius: 6,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: const Icon(Icons.send_rounded,
-                          color: Colors.white, size: 18),
-                    ),
-                  ),
-                ],
-              ),
+                    )
+                  : _isRecording
+                      ? Row(
+                          children: [
+                            Container(
+                              width: 10,
+                              height: 10,
+                              decoration: const BoxDecoration(
+                                color: Colors.redAccent,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Recording... ${_formatDuration(_recordingDuration)}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                color: Colors.redAccent,
+                                fontSize: 15,
+                              ),
+                            ),
+                            const Spacer(),
+                            IconButton(
+                              icon: const Icon(Icons.delete_rounded, color: AppTheme.textMuted),
+                              onPressed: _cancelRecording,
+                            ),
+                            const SizedBox(width: 8),
+                            GestureDetector(
+                              onTap: _stopAndSendRecording,
+                              child: Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: const BoxDecoration(
+                                  color: AppTheme.primary,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(Icons.send_rounded, color: Colors.white, size: 18),
+                              ),
+                            ),
+                          ],
+                        )
+                      : Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: _textCtrl,
+                                minLines: 1,
+                                maxLines: 6,
+                                style: const TextStyle(fontSize: 15),
+                                decoration: InputDecoration(
+                                  hintText: 'Message...',
+                                  hintStyle: const TextStyle(color: AppTheme.textMuted),
+                                  filled: true,
+                                  fillColor: const Color(0xFFF3EFEF),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 18, vertical: 11),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(24),
+                                    borderSide: BorderSide.none,
+                                  ),
+                                  enabledBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(24),
+                                    borderSide: BorderSide.none,
+                                  ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(24),
+                                    borderSide: const BorderSide(color: AppTheme.primary, width: 1.0),
+                                  ),
+                                ),
+                                textCapitalization: TextCapitalization.sentences,
+                                onSubmitted: (_) => _send(),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            GestureDetector(
+                              onTap: _textCtrl.text.trim().isEmpty ? _startRecording : _send,
+                              child: Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.primary,
+                                  shape: BoxShape.circle,
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: AppTheme.primary.withValues(alpha: 0.25),
+                                      blurRadius: 6,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ],
+                                ),
+                                child: Icon(
+                                  _textCtrl.text.trim().isEmpty ? Icons.mic_rounded : Icons.send_rounded,
+                                  color: Colors.white,
+                                  size: 18,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
             ),
           ],
         ),
@@ -1225,7 +1389,13 @@ class _MessageBubble extends StatelessWidget {
                         if (isImage)
                           _buildImageMessage(context)
                         else ...[
-                          _buildMessageText(displayText, isMe, isEmojiOnly: isEmojiOnly),
+                          if (message.type == MessageType.voice)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 4),
+                              child: VoicePlaybackWidget(message: message, isMe: isMe),
+                            )
+                          else
+                            _buildMessageText(displayText, isMe, isEmojiOnly: isEmojiOnly),
                           // ── Timestamp + receipt inside the bubble ──────────
                           const SizedBox(height: 4),
                           Align(
@@ -1305,6 +1475,249 @@ class _MessageBubble extends StatelessWidget {
                       }).toList(),
                     ),
                   ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class VoicePlaybackWidget extends StatefulWidget {
+  final Message message;
+  final bool isMe;
+
+  const VoicePlaybackWidget({
+    super.key,
+    required this.message,
+    required this.isMe,
+  });
+
+  @override
+  State<VoicePlaybackWidget> createState() => _VoicePlaybackWidgetState();
+}
+
+class _VoicePlaybackWidgetState extends State<VoicePlaybackWidget> {
+  FlutterSoundPlayer? _player;
+  bool _isPlaying = false;
+  bool _loading = false;
+  String? _decryptedLocalPath;
+  double _playPosition = 0.0;
+  Duration _currentDuration = Duration.zero;
+  Duration _totalDuration = Duration.zero;
+  StreamSubscription? _playerSub;
+
+  static const List<double> _waveformAmplitudes = [
+    12.0, 24.0, 16.0, 32.0, 20.0, 28.0, 14.0, 22.0, 18.0, 30.0,
+    15.0, 26.0, 20.0, 34.0, 18.0, 24.0, 12.0, 28.0, 16.0, 22.0,
+    14.0, 20.0, 18.0, 26.0, 15.0, 24.0, 12.0, 18.0, 16.0, 10.0
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _player = FlutterSoundPlayer();
+    _totalDuration = Duration(seconds: widget.message.duration ?? 0);
+  }
+
+  @override
+  void dispose() {
+    _playerSub?.cancel();
+    _player?.closePlayer();
+    super.dispose();
+  }
+
+  Future<void> _initPlayer() async {
+    if (_player!.isOpen()) return;
+    await _player!.openPlayer();
+    await _player!.setSubscriptionDuration(const Duration(milliseconds: 100));
+  }
+
+  Future<void> _downloadAndDecrypt() async {
+    if (_decryptedLocalPath != null) return;
+    setState(() => _loading = true);
+
+    try {
+      final partnerPubKey = await CryptoService().fetchPartnerPublicKey();
+      if (partnerPubKey != null) {
+        final sharedKey = await CryptoService().getSharedKey(partnerPubKey);
+        final path = await VoiceService().decryptVoice(widget.message.audioUrl!, sharedKey);
+        if (mounted) {
+          setState(() {
+            _decryptedLocalPath = path;
+            _loading = false;
+          });
+        }
+      } else {
+        setState(() => _loading = false);
+      }
+    } catch (e) {
+      LogService.log('Error decrypting voice message: $e');
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _togglePlay() async {
+    if (_loading) return;
+
+    if (_decryptedLocalPath == null) {
+      await _downloadAndDecrypt();
+      if (_decryptedLocalPath == null) return;
+    }
+
+    await _initPlayer();
+
+    try {
+      if (_isPlaying) {
+        await _player!.pausePlayer();
+        setState(() => _isPlaying = false);
+      } else if (_player!.isPaused) {
+        await _player!.resumePlayer();
+        setState(() => _isPlaying = true);
+      } else {
+        _playerSub?.cancel();
+        await _player!.startPlayer(
+          fromURI: _decryptedLocalPath,
+          codec: Codec.opusOGG,
+          whenFinished: () {
+            setState(() {
+              _isPlaying = false;
+              _playPosition = 0.0;
+              _currentDuration = Duration.zero;
+            });
+          },
+        );
+        _playerSub = _player!.onProgress!.listen((e) {
+          setState(() {
+            _currentDuration = e.position;
+            _totalDuration = e.duration;
+            if (e.duration.inMilliseconds > 0) {
+              _playPosition = e.position.inMilliseconds / e.duration.inMilliseconds;
+            }
+          });
+        });
+        setState(() => _isPlaying = true);
+      }
+    } catch (e) {
+      LogService.log('Playback error: $e');
+    }
+  }
+
+  String _formatDuration(Duration duration) {
+    final m = duration.inMinutes;
+    final s = duration.inSeconds % 60;
+    return '$m:${s.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final themeColor = widget.isMe ? Colors.white : AppTheme.primary;
+    final mutedColor = widget.isMe ? Colors.white38 : AppTheme.divider;
+
+    return Container(
+      width: 220,
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          GestureDetector(
+            onTap: _togglePlay,
+            child: Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: widget.isMe ? Colors.white24 : AppTheme.primaryLight,
+                shape: BoxShape.circle,
+              ),
+              child: _loading
+                  ? Center(
+                      child: SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(themeColor),
+                        ),
+                      ),
+                    )
+                  : Icon(
+                      _isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                      color: themeColor,
+                      size: 22,
+                    ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final width = constraints.maxWidth;
+
+                    void handleScrub(double dx) {
+                      if (_totalDuration.inMilliseconds <= 0) return;
+                      final ratio = (dx / width).clamp(0.0, 1.0);
+                      final targetMs = (ratio * _totalDuration.inMilliseconds).toInt();
+
+                      setState(() {
+                        _playPosition = ratio;
+                        _currentDuration = Duration(milliseconds: targetMs);
+                      });
+
+                      if (_player!.isOpen() && !_loading && _decryptedLocalPath != null) {
+                        _player!.seekToPlayer(Duration(milliseconds: targetMs));
+                      }
+                    }
+
+                    return GestureDetector(
+                      onTapDown: (details) => handleScrub(details.localPosition.dx),
+                      onHorizontalDragUpdate: (details) => handleScrub(details.localPosition.dx),
+                      child: Container(
+                        height: 25,
+                        color: Colors.transparent, // Expand tap target hit area
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: List.generate(_waveformAmplitudes.length, (idx) {
+                            final amplitude = _waveformAmplitudes[idx];
+                            final barProgress = idx / _waveformAmplitudes.length;
+                            final isActive = barProgress <= _playPosition;
+                            return Container(
+                              width: 2.5,
+                              height: amplitude,
+                              decoration: BoxDecoration(
+                                color: isActive ? themeColor : mutedColor,
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                            );
+                          }),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      _formatDuration(_currentDuration),
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: widget.isMe ? Colors.white70 : AppTheme.textMuted,
+                      ),
+                    ),
+                    Text(
+                      _formatDuration(_totalDuration),
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: widget.isMe ? Colors.white70 : AppTheme.textMuted,
+                      ),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
