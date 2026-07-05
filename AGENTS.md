@@ -11,7 +11,7 @@ Package: `com.theawesomeray.tether`
 | Rule | Detail |
 |------|--------|
 | **Never push to GitHub** | Do not run `git push`, `git tag`, or `gh release create` unless the user explicitly asks in that message |
-| **Always bump `pubspec.yaml` version to +0.1.0 unless the user explicitly asks to set a specific version** |
+| **Never bump version numbers** | Do not change `pubspec.yaml` version. The user will manage versioning manually |
 | **Never change `coupleId`** | It is always `'ray-aproo'` — hardcoded across Firestore paths |
 | **Never change allowed emails** | `ray@redacted.invalid` = Ray, `aproo@redacted.invalid` = Aproo |
 | **Name comparison is case-sensitive** | `myName == 'Ray'` (capital R). Partner key strings are lowercase `'ray'` / `'aproo'` |

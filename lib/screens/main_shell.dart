@@ -408,13 +408,6 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   }
 
   Future<void> _checkE2EESetup() async {
-    final myPubKey = await CryptoService().getPublicKey();
-    if (myPubKey != null) {
-      // Sync public key just in case it is missing on Firestore
-      await _firestore.registerPublicKey(_myPresenceKey, myPubKey);
-      return;
-    }
-
     if (!mounted) return;
 
     // Show a loading dialog while checking Google Drive backup
@@ -430,7 +423,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
               children: [
                 CircularProgressIndicator(color: AppTheme.primary),
                 SizedBox(height: 16),
-                Text('Checking for encryption keys backup...'),
+                Text('Checking encryption status...'),
               ],
             ),
           ),
@@ -438,15 +431,86 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       ),
     );
 
+    final myPubKey = await CryptoService().getPublicKey();
     final backup = await GoogleDriveService().restoreKeyBackup();
+    
     if (!mounted) return;
     Navigator.pop(context); // Dismiss loading dialog
+
+    if (myPubKey != null) {
+      // Sync public key just in case it is missing on Firestore
+      await _firestore.registerPublicKey(_myPresenceKey, myPubKey);
+      
+      // If we have local keys but NO backup on Google Drive, we must prompt to upload backup!
+      if (backup == null) {
+        _showBackupRequiredDialog();
+      }
+      return;
+    }
 
     if (backup != null) {
       _showRestoreE2EEDialog(backup);
     } else {
       _showCreateE2EEDialog();
     }
+  }
+
+  void _showBackupRequiredDialog() {
+    final pinCtrl = TextEditingController();
+    String? error;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          title: Text('Secure E2EE Backup', style: GoogleFonts.playfairDisplay(fontWeight: FontWeight.bold)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Your E2EE keys are active locally, but not backed up to Google Drive. Please create a 4-digit PIN to upload your secure backup:'),
+              const SizedBox(height: 16),
+              TextField(
+                controller: pinCtrl,
+                keyboardType: TextInputType.number,
+                obscureText: true,
+                maxLength: 4,
+                decoration: InputDecoration(
+                  labelText: 'Create 4-Digit PIN',
+                  errorText: error,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () async {
+                final pin = pinCtrl.text.trim();
+                if (pin.length != 4) {
+                  setDialogState(() => error = 'PIN must be exactly 4 digits');
+                  return;
+                }
+                try {
+                  final privateKey = await CryptoService().getPrivateKey();
+                  final publicKey = await CryptoService().getPublicKey();
+                  if (privateKey != null && publicKey != null) {
+                    final encryptedBackup = await CryptoService().encryptPrivateKey(pin, privateKey);
+                    encryptedBackup['publicKey'] = publicKey;
+                    await GoogleDriveService().backupKeyBackup(encryptedBackup);
+                  }
+                  if (ctx.mounted) Navigator.pop(ctx);
+                } catch (e) {
+                  setDialogState(() => error = 'Backup failed: $e');
+                }
+              },
+              child: const Text('Back Up'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _showRestoreE2EEDialog(Map<String, dynamic> backup) {
