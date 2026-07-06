@@ -82,8 +82,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       final googleUser = await GoogleSignIn.instance.attemptLightweightAuthentication();
 
       if (googleUser == null) {
-        LogService.log('Google Sign-In user not available on scope check. Logging out.');
-        await _auth.signOut();
+        LogService.log('Google Sign-In user not available on startup scope check. Skipping check until next operation.');
         return;
       }
 
@@ -97,7 +96,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
           LogService.log('Google Sign-In: Missing required API scopes. Requesting them...');
           final requestedAuth = await googleUser.authorizationClient.authorizeScopes(scopes);
           if (requestedAuth.accessToken == null) {
-            LogService.log('Google Sign-In: Scopes not granted. Logging out.');
+            LogService.log('Google Sign-In: Scopes not granted. Logging out to force re-consent.');
             await _auth.signOut();
           }
         }
