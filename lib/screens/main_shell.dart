@@ -17,6 +17,7 @@ import '../services/log_service.dart';
 import '../services/google_drive_service.dart';
 import '../services/crypto_service.dart';
 import '../config/env_config.dart';
+import '../config/google_scopes.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -87,21 +88,19 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       }
 
       try {
-        final scopes = [
-          'https://www.googleapis.com/auth/drive.file',
-          'https://www.googleapis.com/auth/drive.appdata',
-        ];
+        // Self-healing scope check: only ever a silent lookup. Android
+        // requires authorizeScopes() (the interactive grant) to be
+        // triggered by a real user tap, so we must never call it here in
+        // the background — that was what caused the Google consent screen
+        // to pop up repeatedly. Instead, if GoogleScopes.all has grown to
+        // include scopes this signed-in user never granted, sign them out
+        // so the normal login flow (AuthService.signInWithGoogle) requests
+        // the full current scope set from a real button press.
         LogService.log('Google Sign-In: Checking cached scopes via authorizationForScopes');
-        final auth = await googleUser.authorizationClient.authorizationForScopes(scopes);
+        final auth = await googleUser.authorizationClient.authorizationForScopes(GoogleScopes.all);
         if (auth == null) {
-          LogService.log('Google Sign-In: Missing cached scopes in authorizationForScopes. Requesting user authorization...');
-          final requestedAuth = await googleUser.authorizationClient.authorizeScopes(scopes);
-          if (requestedAuth.accessToken == null) {
-            LogService.log('Google Sign-In: Scopes not granted by user. Logging out to force re-consent.');
-            await _auth.signOut();
-          } else {
-            LogService.log('Google Sign-In: Scopes successfully granted by user');
-          }
+          LogService.log('Google Sign-In: Missing cached scopes in authorizationForScopes. Logging out to force re-consent.');
+          await _auth.signOut();
         } else {
           LogService.log('Google Sign-In: Cached scopes verified successfully');
         }

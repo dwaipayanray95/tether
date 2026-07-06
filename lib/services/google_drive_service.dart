@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:dio/dio.dart';
+import '../config/google_scopes.dart';
 import 'auth_service.dart';
 import 'log_service.dart';
 import 'package:google_sign_in/google_sign_in.dart';
@@ -9,6 +10,12 @@ class GoogleDriveService {
   final Dio _dio = Dio();
   final AuthService _auth = AuthService();
 
+  // Only ever checks the cached authorization silently. Android requires
+  // authorizeScopes() (the interactive grant) to be triggered by a real user
+  // tap, so it must never be called from this background path — doing so
+  // was the cause of the Google consent screen popping up repeatedly.
+  // If the scope isn't cached, callers should surface a re-login prompt
+  // (see MainShell._validateGoogleScopes) rather than requesting it here.
   Future<String> _getAccessToken() async {
     LogService.log('Google Drive: Obtaining access token');
     final googleUser = await GoogleSignIn.instance.attemptLightweightAuthentication();
@@ -16,31 +23,15 @@ class GoogleDriveService {
       LogService.log('Google Drive Error: Lightweight authentication returned null user');
       throw Exception('Google Sign-In user is not available.');
     }
-    
-    final scopes = [
-      'https://www.googleapis.com/auth/drive.file',
-      'https://www.googleapis.com/auth/drive.appdata',
-    ];
-    
-    // Check if scopes are already authorized in cache
-    var authorization = await googleUser.authorizationClient.authorizationForScopes(scopes);
-    if (authorization != null) {
-      final token = authorization.accessToken;
-      if (token != null) {
-        LogService.log('Google Drive: Successfully retrieved cached access token silently');
-        return token;
-      }
-    }
-    
-    LogService.log('Google Drive: Token not in cache or expired. Requesting via authorizeScopes...');
-    authorization = await googleUser.authorizationClient.authorizeScopes(scopes);
-    final token = authorization.accessToken;
+
+    final authorization = await googleUser.authorizationClient.authorizationForScopes(GoogleScopes.drive);
+    final token = authorization?.accessToken;
     if (token == null) {
-      LogService.log('Google Drive Error: Failed to obtain authorized access token from authorizeScopes');
-      throw Exception('Failed to obtain Google access token.');
+      LogService.log('Google Drive Error: Drive scopes not authorized. User needs to re-authenticate.');
+      throw Exception('Google Drive access not authorized. Please sign in again.');
     }
-    
-    LogService.log('Google Drive: Successfully obtained access token after scopes request');
+
+    LogService.log('Google Drive: Successfully retrieved cached access token silently');
     return token;
   }
 

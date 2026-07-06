@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../config/env_config.dart';
+import '../config/google_scopes.dart';
 import 'log_service.dart';
 
 // Only these two emails are allowed in
@@ -56,10 +57,10 @@ class AuthService {
     }
 
     final googleAuth = googleUser.authentication;
-    final authorization = await googleUser.authorizationClient.authorizeScopes([
-      'email',
-      'profile',
-    ]);
+    // Request every scope the app needs in one go, from this user-initiated
+    // tap — Android requires authorizeScopes() to be triggered by a real
+    // user interaction, so background code must never call it directly.
+    final authorization = await googleUser.authorizationClient.authorizeScopes(GoogleScopes.all);
     final credential = GoogleAuthProvider.credential(
       accessToken: authorization.accessToken,
       idToken: googleAuth.idToken,
