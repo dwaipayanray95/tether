@@ -43,6 +43,12 @@ class VoiceService {
     if (!_isRecorderInitialized || _recorder == null) return null;
     LogService.log('Stopping audio recording');
     final path = await _recorder!.stop();
+    // Reusing the same AudioRecorder instance across multiple recordings can
+    // leave the native recorder session in a stale state on Android, causing
+    // the next start() to silently keep writing to (or stop() to return) the
+    // previous recording's file. Dispose it now so the next startRecording()
+    // creates a fresh instance.
+    await disposeRecorder();
     return path;
   }
 

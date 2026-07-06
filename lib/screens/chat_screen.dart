@@ -92,6 +92,7 @@ class ChatScreenState extends State<ChatScreen> {
   Timer? _recordingTimer;
   String? _recordingPath;
   bool _isSendingVoice = false;
+  bool _isStoppingRecording = false;
 
   // E2EE decryption cache
   final Map<String, String> _decryptedTextCache = {};
@@ -401,6 +402,14 @@ class ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _startRecording() async {
+    // Guard against a stray/duplicate tap re-entering this while a previous
+    // recording is still being stopped/sent, which could otherwise start a
+    // second recording session on top of one that hasn't fully torn down.
+    if (_isRecording || _isSendingVoice || _isStoppingRecording) {
+      LogService.log(
+          'Voice: _startRecording ignored — already recording=$_isRecording sending=$_isSendingVoice stopping=$_isStoppingRecording');
+      return;
+    }
     try {
       final granted = await Permission.microphone.request();
       if (!granted.isGranted) {
@@ -414,7 +423,8 @@ class ChatScreenState extends State<ChatScreen> {
 
       final tempDir = await getTemporaryDirectory();
       _recordingPath = '${tempDir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.ogg';
-      
+      LogService.log('Voice: _startRecording using path $_recordingPath');
+
       await VoiceService().startRecording(_recordingPath!);
       setState(() {
         _isRecording = true;
@@ -431,50 +441,66 @@ class ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _stopAndSendRecording() async {
-    _recordingTimer?.cancel();
-    final path = await VoiceService().stopRecording();
-    setState(() => _isRecording = false);
-
-    if (path == null || _recordingDuration < 1) {
-      LogService.log('Recording too short or null. Discarding.');
+    // Guard against the send tap firing twice in quick succession (no
+    // debounce on the GestureDetector), which would otherwise call
+    // VoiceService().stopRecording() twice for the same session.
+    if (_isStoppingRecording) {
+      LogService.log('Voice: _stopAndSendRecording ignored — already stopping');
       return;
     }
-
-    setState(() => _isSendingVoice = true);
-
+    _isStoppingRecording = true;
     try {
-      final partnerPubKey = await CryptoService().fetchPartnerPublicKey();
-      if (partnerPubKey != null) {
-        final sharedKey = await CryptoService().getSharedKey(partnerPubKey);
-        final encryptedVoiceJson = await VoiceService().encryptVoice(path, sharedKey);
-        
-        if (encryptedVoiceJson != null) {
-          final encryptedTextMap = await CryptoService().encryptText('[Voice Message]', sharedKey);
-          final textToSend = jsonEncode(encryptedTextMap);
+      _recordingTimer?.cancel();
+      final path = await VoiceService().stopRecording();
+      setState(() => _isRecording = false);
+      LogService.log(
+          'Voice: stopRecording returned path=$path (expected _recordingPath=$_recordingPath), duration=$_recordingDuration');
 
-          await _firestore.sendMessage(
-            _coupleId,
-            Message(
-              id: const Uuid().v4(),
-              senderId: _myUid,
-              text: textToSend,
-              type: MessageType.voice,
-              audioUrl: encryptedVoiceJson,
-              duration: _recordingDuration,
-              sentAt: DateTime.now(),
-              readBy: [_myUid],
-            ),
-            senderName: _auth.myName,
-          );
-          
-          final myKey = _auth.isRay ? 'ray' : 'aproo';
-          await _firestore.updatePresence(myKey);
-        }
+      if (path == null || _recordingDuration < 1) {
+        LogService.log('Recording too short or null. Discarding.');
+        return;
       }
-    } catch (e) {
-      LogService.log('Error uploading or sending voice message: $e');
+
+      setState(() => _isSendingVoice = true);
+
+      try {
+        final partnerPubKey = await CryptoService().fetchPartnerPublicKey();
+        if (partnerPubKey != null) {
+          final sharedKey = await CryptoService().getSharedKey(partnerPubKey);
+          final encryptedVoiceJson = await VoiceService().encryptVoice(path, sharedKey);
+
+          if (encryptedVoiceJson != null) {
+            final encryptedTextMap = await CryptoService().encryptText('[Voice Message]', sharedKey);
+            final textToSend = jsonEncode(encryptedTextMap);
+
+            await _firestore.sendMessage(
+              _coupleId,
+              Message(
+                id: const Uuid().v4(),
+                senderId: _myUid,
+                text: textToSend,
+                type: MessageType.voice,
+                audioUrl: encryptedVoiceJson,
+                duration: _recordingDuration,
+                sentAt: DateTime.now(),
+                readBy: [_myUid],
+              ),
+              senderName: _auth.myName,
+            );
+
+            final myKey = _auth.isRay ? 'ray' : 'aproo';
+            await _firestore.updatePresence(myKey);
+          }
+        }
+      } catch (e) {
+        LogService.log('Error uploading or sending voice message: $e');
+      } finally {
+        setState(() => _isSendingVoice = false);
+        _recordingPath = null;
+        _recordingDuration = 0;
+      }
     } finally {
-      setState(() => _isSendingVoice = false);
+      _isStoppingRecording = false;
     }
   }
 
@@ -1468,7 +1494,18 @@ class _MessageBubble extends StatelessWidget {
                           if (message.type == MessageType.voice)
                             Padding(
                               padding: const EdgeInsets.only(bottom: 4),
-                              child: VoicePlaybackWidget(message: message, isMe: isMe),
+                              // Without a key tied to message identity, this
+                              // list (built with reverse: true, so every
+                              // older message shifts position when a new one
+                              // arrives) lets Flutter reuse this widget's
+                              // State — including its cached decrypted audio
+                              // path and player — for a different message
+                              // that happens to land at the same position.
+                              child: VoicePlaybackWidget(
+                                key: ValueKey(message.id),
+                                message: message,
+                                isMe: isMe,
+                              ),
                             )
                           else
                             _buildMessageText(displayText, isMe, isEmojiOnly: isEmojiOnly),
@@ -1657,11 +1694,21 @@ class _VoicePlaybackWidgetState extends State<VoicePlaybackWidget> {
           fromURI: _decryptedLocalPath,
           codec: Codec.opusOGG,
           whenFinished: () {
-            setState(() {
-              _isPlaying = false;
-              _playPosition = 0.0;
-              _currentDuration = Duration.zero;
-            });
+            // Without explicitly cancelling the progress subscription and
+            // stopping the player here, flutter_sound keeps firing
+            // onProgress with the last known position/duration forever,
+            // flooding the console and leaving the native player session
+            // open.
+            _playerSub?.cancel();
+            _playerSub = null;
+            _player?.stopPlayer();
+            if (mounted) {
+              setState(() {
+                _isPlaying = false;
+                _playPosition = 0.0;
+                _currentDuration = Duration.zero;
+              });
+            }
           },
         );
         _playerSub = _player!.onProgress!.listen((e) {
