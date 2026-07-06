@@ -9,20 +9,38 @@ class GoogleDriveService {
   final Dio _dio = Dio();
   final AuthService _auth = AuthService();
 
-  // Helper to obtain OAuth token
   Future<String> _getAccessToken() async {
+    LogService.log('Google Drive: Obtaining access token');
     final googleUser = await GoogleSignIn.instance.attemptLightweightAuthentication();
     if (googleUser == null) {
+      LogService.log('Google Drive Error: Lightweight authentication returned null user');
       throw Exception('Google Sign-In user is not available.');
     }
-    final authorization = await googleUser.authorizationClient.authorizeScopes([
+    
+    final scopes = [
       'https://www.googleapis.com/auth/drive.file',
       'https://www.googleapis.com/auth/drive.appdata',
-    ]);
+    ];
+    
+    // Check if scopes are already authorized in cache
+    var authorization = await googleUser.authorizationClient.authorizationForScopes(scopes);
+    if (authorization != null) {
+      final token = authorization.accessToken;
+      if (token != null) {
+        LogService.log('Google Drive: Successfully retrieved cached access token silently');
+        return token;
+      }
+    }
+    
+    LogService.log('Google Drive: Token not in cache or expired. Requesting via authorizeScopes...');
+    authorization = await googleUser.authorizationClient.authorizeScopes(scopes);
     final token = authorization.accessToken;
     if (token == null) {
+      LogService.log('Google Drive Error: Failed to obtain authorized access token from authorizeScopes');
       throw Exception('Failed to obtain Google access token.');
     }
+    
+    LogService.log('Google Drive: Successfully obtained access token after scopes request');
     return token;
   }
 

@@ -91,14 +91,19 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
           'https://www.googleapis.com/auth/drive.file',
           'https://www.googleapis.com/auth/drive.appdata',
         ];
+        LogService.log('Google Sign-In: Checking cached scopes via authorizationForScopes');
         final auth = await googleUser.authorizationClient.authorizationForScopes(scopes);
         if (auth == null) {
-          LogService.log('Google Sign-In: Missing required API scopes. Requesting them...');
+          LogService.log('Google Sign-In: Missing cached scopes in authorizationForScopes. Requesting user authorization...');
           final requestedAuth = await googleUser.authorizationClient.authorizeScopes(scopes);
           if (requestedAuth.accessToken == null) {
-            LogService.log('Google Sign-In: Scopes not granted. Logging out to force re-consent.');
+            LogService.log('Google Sign-In: Scopes not granted by user. Logging out to force re-consent.');
             await _auth.signOut();
+          } else {
+            LogService.log('Google Sign-In: Scopes successfully granted by user');
           }
+        } else {
+          LogService.log('Google Sign-In: Cached scopes verified successfully');
         }
       } catch (e) {
         final errStr = e.toString().toLowerCase();
