@@ -94,16 +94,67 @@ jobs:
           # Get previous tag
           PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
           
-          echo "### 🚀 What's New" > changelog.md
+          echo "## Tether Release Details" > changelog.md
+          echo "" >> changelog.md
+          
+          # Create temporary files for categorization
+          touch feats.txt fixes.txt ui.txt perf.txt others.txt
+          
           if [ -z "$PREV_TAG" ]; then
-            echo "First release tag." >> changelog.md
-            echo "" >> changelog.md
-            git log --pretty=format:"* %s (%h)" HEAD >> changelog.md
+            git log --pretty=format:"%s (%h)" HEAD > commits.txt
           else
-            echo "Changes since tag **$PREV_TAG**:" >> changelog.md
-            echo "" >> changelog.md
-            git log --pretty=format:"* %s (%h)" ${PREV_TAG}..HEAD >> changelog.md
+            git log --pretty=format:"%s (%h)" ${PREV_TAG}..HEAD > commits.txt
           fi
+          
+          # Parse and sort commits
+          while IFS= read -r line; do
+            lower_line=$(echo "$line" | tr '[:upper:]' '[:lower:]')
+            if [[ "$lower_line" =~ (feat|add|new|🚀|✨) ]]; then
+              echo "* $line" >> feats.txt
+            elif [[ "$lower_line" =~ (fix|bug|patch|crash|issue|🐛|🔧) ]]; then
+              echo "* $line" >> fixes.txt
+            elif [[ "$lower_line" =~ (ui|style|color|theme|design|layout|🎨) ]]; then
+              echo "* $line" >> ui.txt
+            elif [[ "$lower_line" =~ (refactor|perf|clean|chore|opt|⚡) ]]; then
+              echo "* $line" >> perf.txt
+            else
+              echo "* $line" >> others.txt
+            fi
+          done < commits.txt
+          
+          # Build beautiful markdown structure
+          if [ -s feats.txt ]; then
+            echo "### 🚀 Features & Enhancements" >> changelog.md
+            cat feats.txt >> changelog.md
+            echo "" >> changelog.md
+          fi
+          
+          if [ -s fixes.txt ]; then
+            echo "### 🐛 Bug Fixes" >> changelog.md
+            cat fixes.txt >> changelog.md
+            echo "" >> changelog.md
+          fi
+          
+          if [ -s ui.txt ]; then
+            echo "### 🎨 UI & Layout" >> changelog.md
+            cat ui.txt >> changelog.md
+            echo "" >> changelog.md
+          fi
+          
+          if [ -s perf.txt ]; then
+            echo "### ⚡ Performance & Refactoring" >> changelog.md
+            cat perf.txt >> changelog.md
+            echo "" >> changelog.md
+          fi
+          
+          if [ -s others.txt ]; then
+            echo "### 📝 Other Changes" >> changelog.md
+            cat others.txt >> changelog.md
+            echo "" >> changelog.md
+          fi
+          
+          # Clean up temporary logs
+          rm -f feats.txt fixes.txt ui.txt perf.txt others.txt commits.txt
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')

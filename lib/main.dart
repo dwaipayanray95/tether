@@ -8,10 +8,12 @@ import 'services/nav_service.dart';
 import 'services/log_service.dart';
 import 'services/music_sync_service.dart';
 import 'theme/app_theme.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
+  await GoogleSignIn.instance.initialize();
   await LogService.init();
 
   FlutterError.onError = (details) {

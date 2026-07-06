@@ -10,7 +10,7 @@ class LocationService {
 
   static Future<String?> getLocality(double lat, double lng) async {
     try {
-      List<Placemark> placemarks = await placemarkFromCoordinates(lat, lng);
+      List<Placemark> placemarks = await Geocoding().placemarkFromCoordinates(lat, lng);
       if (placemarks.isNotEmpty) {
         final p = placemarks.first;
         return p.locality ?? p.subLocality ?? p.name;

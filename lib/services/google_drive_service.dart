@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'auth_service.dart';
 import 'log_service.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 class GoogleDriveService {
   final Dio _dio = Dio();
@@ -10,12 +11,15 @@ class GoogleDriveService {
 
   // Helper to obtain OAuth token
   Future<String> _getAccessToken() async {
-    final googleUser = await _auth.googleSignIn.signInSilently();
+    final googleUser = await GoogleSignIn.instance.attemptLightweightAuthentication();
     if (googleUser == null) {
       throw Exception('Google Sign-In user is not available.');
     }
-    final authentication = await googleUser.authentication;
-    final token = authentication.accessToken;
+    final authorization = await googleUser.authorizationClient.authorizeScopes([
+      'https://www.googleapis.com/auth/drive.file',
+      'https://www.googleapis.com/auth/drive.appdata',
+    ]);
+    final token = authorization.accessToken;
     if (token == null) {
       throw Exception('Failed to obtain Google access token.');
     }

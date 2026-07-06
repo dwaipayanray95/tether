@@ -17,6 +17,7 @@ import '../services/log_service.dart';
 import '../services/google_drive_service.dart';
 import '../services/crypto_service.dart';
 import '../config/env_config.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class MainShell extends StatefulWidget {
@@ -78,8 +79,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       final isGoogleUser = user.providerData.any((p) => p.providerId == 'google.com');
       if (!isGoogleUser) return;
 
-      final googleUser = _auth.googleSignIn.currentUser ??
-          await _auth.googleSignIn.signInSilently();
+      final googleUser = await GoogleSignIn.instance.attemptLightweightAuthentication();
 
       if (googleUser == null) {
         LogService.log('Google Sign-In user not available on scope check. Logging out.');
@@ -88,15 +88,23 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       }
 
       try {
-        final hasAllScopes = await _auth.googleSignIn.canAccessScopes(_auth.googleSignIn.scopes);
-        if (!hasAllScopes) {
-          LogService.log('Google Sign-In: Missing required API scopes. Logging out to force re-consent.');
-          await _auth.signOut();
+        final scopes = [
+          'https://www.googleapis.com/auth/drive.file',
+          'https://www.googleapis.com/auth/drive.appdata',
+        ];
+        final auth = await googleUser.authorizationClient.authorizationForScopes(scopes);
+        if (auth == null) {
+          LogService.log('Google Sign-In: Missing required API scopes. Requesting them...');
+          final requestedAuth = await googleUser.authorizationClient.authorizeScopes(scopes);
+          if (requestedAuth.accessToken == null) {
+            LogService.log('Google Sign-In: Scopes not granted. Logging out.');
+            await _auth.signOut();
+          }
         }
       } catch (e) {
         final errStr = e.toString().toLowerCase();
         if (errStr.contains('unimplemented') || errStr.contains('not implemented') || errStr.contains('notsupported')) {
-          LogService.log('Google Sign-In: canAccessScopes is unimplemented on this platform. Skipping check.');
+          LogService.log('Google Sign-In: scopes check is unimplemented on this platform. Skipping check.');
         } else {
           LogService.log('Google Sign-In scope verification failed: $e. Logging out to be safe.');
           await _auth.signOut();

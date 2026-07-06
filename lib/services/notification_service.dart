@@ -68,9 +68,8 @@ class NotificationService {
         AndroidFlutterLocalNotificationsPlugin>();
     await androidPlugin?.createNotificationChannel(_defaultChannel);
 
-    // Initialise local notifications
     await _local.initialize(
-      const InitializationSettings(
+      settings: const InitializationSettings(
         android: AndroidInitializationSettings('@mipmap/ic_launcher'),
       ),
       onDidReceiveNotificationResponse: (NotificationResponse response) {
@@ -203,10 +202,10 @@ class NotificationService {
     }
 
     await _local.show(
-      title.hashCode ^ body.hashCode,
-      title,
-      body,
-      NotificationDetails(
+      id: title.hashCode ^ body.hashCode,
+      title: title,
+      body: body,
+      notificationDetails: NotificationDetails(
         android: AndroidNotificationDetails(
           _defaultChannel.id,
           _defaultChannel.name,
@@ -254,11 +253,11 @@ class NotificationService {
     final scheduledDate = tz.TZDateTime.from(todo.dueDate!, tz.local);
 
     await _local.zonedSchedule(
-      todo.id.hashCode,
-      '⏰ Task Reminder',
-      todo.title,
-      scheduledDate,
-      NotificationDetails(
+      id: todo.id.hashCode,
+      title: '⏰ Task Reminder',
+      body: todo.title,
+      scheduledDate: scheduledDate,
+      notificationDetails: NotificationDetails(
         android: AndroidNotificationDetails(
           _defaultChannel.id,
           _defaultChannel.name,
@@ -271,14 +270,12 @@ class NotificationService {
         ),
       ),
       androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-      uiLocalNotificationDateInterpretation:
-          UILocalNotificationDateInterpretation.absoluteTime,
     );
   }
 
   static Future<void> cancelTodoReminder(String todoId) async {
     LogService.log('Canceling local notification for to-do $todoId');
-    await _local.cancel(todoId.hashCode);
+    await _local.cancel(id: todoId.hashCode);
   }
 
   static Future<void> syncTodoNotifications(List<TodoItem> todos) async {
@@ -292,7 +289,7 @@ class NotificationService {
       for (final p in pending) {
         // Only manage todo notification hashes (skip other notifications if any)
         if (!activeTodoHashCodes.contains(p.id)) {
-          await _local.cancel(p.id);
+          await _local.cancel(id: p.id);
         }
       }
 

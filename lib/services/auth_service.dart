@@ -12,14 +12,7 @@ const String coupleId = EnvConfig.coupleId; // shared ID for Firestore collectio
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _db = FirebaseFirestore.instance;
-  final GoogleSignIn _googleSignIn = GoogleSignIn(
-    scopes: [
-      'https://www.googleapis.com/auth/drive.file',
-      'https://www.googleapis.com/auth/drive.appdata',
-    ],
-  );
-
-  GoogleSignIn get googleSignIn => _googleSignIn;
+  GoogleSignIn get googleSignIn => GoogleSignIn.instance;
 
   User? get currentUser => _auth.currentUser;
   Stream<User?> get authStateChanges => _auth.authStateChanges();
@@ -49,7 +42,7 @@ class AuthService {
 
   Future<UserCredential?> signInWithGoogle() async {
     LogService.log('Google Sign-In initiated');
-    final googleUser = await _googleSignIn.signIn();
+    final googleUser = await GoogleSignIn.instance.authenticate();
     if (googleUser == null) {
       LogService.log('Google Sign-In cancelled by user');
       return null;
@@ -58,13 +51,17 @@ class AuthService {
     final email = googleUser.email.toLowerCase();
     if (!allowedEmails.map((e) => e.toLowerCase()).contains(email)) {
       LogService.log('Sign-In REJECTED: $email not allowed');
-      await _googleSignIn.signOut();
+      await GoogleSignIn.instance.signOut();
       throw Exception('This app is private. Your Google account is not allowed.');
     }
 
-    final googleAuth = await googleUser.authentication;
+    final googleAuth = googleUser.authentication;
+    final authorization = await googleUser.authorizationClient.authorizeScopes([
+      'email',
+      'profile',
+    ]);
     final credential = GoogleAuthProvider.credential(
-      accessToken: googleAuth.accessToken,
+      accessToken: authorization.accessToken,
       idToken: googleAuth.idToken,
     );
 
@@ -115,7 +112,7 @@ class AuthService {
 
   Future<void> signOut() async {
     LogService.log('Sign-Out initiated');
-    await _googleSignIn.signOut();
+    await GoogleSignIn.instance.signOut();
     await _auth.signOut();
   }
 
