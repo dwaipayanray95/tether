@@ -770,7 +770,7 @@ class _QuickSnapState extends State<QuickSnap> {
                     child: Align(
                       alignment: Alignment.centerLeft,
                       child: Text(
-                        partnerCaption.isNotEmpty ? partnerCaption : 'A live photo...',
+                        displayCaption.isNotEmpty ? displayCaption : 'A live photo...',
                         style: GoogleFonts.caveat(
                           color: const Color(0xFF2D2D2D),
                           fontSize: 20,
