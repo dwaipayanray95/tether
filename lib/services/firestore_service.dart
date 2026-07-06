@@ -506,4 +506,33 @@ class FirestoreService {
       '${senderKey}SentAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
   }
+
+  // ── Partner Info ─────────────────────────────────────────────────────────
+
+  Stream<DocumentSnapshot<Map<String, dynamic>>> userDocStream(String uid) {
+    return _db.collection('users').doc(uid).snapshots();
+  }
+
+  Future<void> updateProfile(String uid, Map<String, dynamic> profile) async {
+    LogService.log('Updating partner profile for $uid');
+    await _db.collection('users').doc(uid).set(
+      {'profile': profile},
+      SetOptions(merge: true),
+    );
+  }
+
+  Stream<DocumentSnapshot<Map<String, dynamic>>> coupleDocStream(String coupleId) {
+    return _db.collection('couples').doc(coupleId).snapshots();
+  }
+
+  Future<void> updateAnniversary(String coupleId, DateTime? anniversary) async {
+    LogService.log('Updating couple anniversary');
+    await _db.collection('couples').doc(coupleId).set(
+      {
+        'anniversary':
+            anniversary != null ? Timestamp.fromDate(anniversary) : null,
+      },
+      SetOptions(merge: true),
+    );
+  }
 }

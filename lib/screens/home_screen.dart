@@ -7,6 +7,7 @@ import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/home/quick_snap.dart';
+import '../widgets/home/profile_completion_bar.dart';
 import '../widgets/home/music_card.dart';
 import '../widgets/home/poke_card.dart';
 import '../widgets/home/quick_actions.dart';
@@ -225,7 +226,8 @@ class _HomeScreenState extends State<HomeScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _buildHeader(),
-              const SizedBox(height: 14),
+              const SizedBox(height: 10),
+              const ProfileCompletionBar(),
               const QuickSnap(),
               const SizedBox(height: 18),
               _buildStickyHeader(),

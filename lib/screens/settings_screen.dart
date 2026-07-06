@@ -4,6 +4,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
 import 'diagnostics_screen.dart';
+import 'partner_info_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -24,8 +25,11 @@ class SettingsScreen extends StatelessWidget {
           _buildTile(
             icon: Icons.person_outline_rounded,
             title: 'Partner Info',
-            subtitle: 'Names, anniversary, and more',
-            onTap: () {}, // Future feature
+            subtitle: 'Birthday, sizes, favorites, and more',
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const PartnerInfoScreen()),
+            ),
           ),
           const SizedBox(height: 24),
           _buildSectionHeader('Fun Stuff'),
