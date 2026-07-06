@@ -18,6 +18,32 @@ class AuthService {
   User? get currentUser => _auth.currentUser;
   Stream<User?> get authStateChanges => _auth.authStateChanges();
 
+  // attemptLightweightAuthentication() briefly flashes Android's Credential
+  // Manager UI (AssistedSignInActivity/CredentialChooserActivity) even when
+  // it resolves silently. Multiple independent call sites (Drive backup,
+  // restore, scope validation) each calling it separately at launch caused
+  // that UI to flash repeatedly in a row, which looked like the Google
+  // sign-in card "kept popping up". Cache the result for the app session so
+  // it's only requested once.
+  //
+  // Must be static: every call site does `AuthService()` fresh (e.g.
+  // GoogleDriveService() constructs its own AuthService() internally), so
+  // an instance field would reset on every call and never actually cache.
+  static GoogleSignInAccount? _cachedGoogleUser;
+  static Future<GoogleSignInAccount?>? _lightweightAuthFuture;
+
+  Future<GoogleSignInAccount?> getGoogleUser() {
+    if (_cachedGoogleUser != null) return Future.value(_cachedGoogleUser);
+    return _lightweightAuthFuture ??=
+        (GoogleSignIn.instance.attemptLightweightAuthentication() ??
+                Future.value(null))
+            .then((user) {
+      _cachedGoogleUser = user;
+      _lightweightAuthFuture = null;
+      return user;
+    });
+  }
+
   bool get isRay =>
       currentUser?.email?.toLowerCase() == allowedEmails[0].toLowerCase();
 
@@ -48,6 +74,7 @@ class AuthService {
       LogService.log('Google Sign-In cancelled by user');
       return null;
     }
+    _cachedGoogleUser = googleUser;
 
     final email = googleUser.email.toLowerCase();
     if (!allowedEmails.map((e) => e.toLowerCase()).contains(email)) {
@@ -113,6 +140,8 @@ class AuthService {
 
   Future<void> signOut() async {
     LogService.log('Sign-Out initiated');
+    _cachedGoogleUser = null;
+    _lightweightAuthFuture = null;
     await GoogleSignIn.instance.signOut();
     await _auth.signOut();
   }

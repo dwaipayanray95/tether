@@ -18,7 +18,6 @@ import '../services/google_drive_service.dart';
 import '../services/crypto_service.dart';
 import '../config/env_config.dart';
 import '../config/google_scopes.dart';
-import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class MainShell extends StatefulWidget {
@@ -80,7 +79,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       final isGoogleUser = user.providerData.any((p) => p.providerId == 'google.com');
       if (!isGoogleUser) return;
 
-      final googleUser = await GoogleSignIn.instance.attemptLightweightAuthentication();
+      final googleUser = await _auth.getGoogleUser();
 
       if (googleUser == null) {
         LogService.log('Google Sign-In user not available on startup scope check. Skipping check until next operation.');

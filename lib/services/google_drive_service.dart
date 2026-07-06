@@ -4,7 +4,6 @@ import 'package:dio/dio.dart';
 import '../config/google_scopes.dart';
 import 'auth_service.dart';
 import 'log_service.dart';
-import 'package:google_sign_in/google_sign_in.dart';
 
 class GoogleDriveService {
   final Dio _dio = Dio();
@@ -18,7 +17,7 @@ class GoogleDriveService {
   // (see MainShell._validateGoogleScopes) rather than requesting it here.
   Future<String> _getAccessToken() async {
     LogService.log('Google Drive: Obtaining access token');
-    final googleUser = await GoogleSignIn.instance.attemptLightweightAuthentication();
+    final googleUser = await _auth.getGoogleUser();
     if (googleUser == null) {
       LogService.log('Google Drive Error: Lightweight authentication returned null user');
       throw Exception('Google Sign-In user is not available.');
