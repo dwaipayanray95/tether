@@ -1,0 +1,392 @@
+import 'dart:convert';
+import 'dart:typed_data';
+import 'package:cryptography/cryptography.dart';
+import '../config/backup_config.dart';
+import '../models/backup_cursor_model.dart';
+import '../models/backup_snapshot_model.dart';
+import 'auth_service.dart';
+import 'backup_cursor_store.dart';
+import 'backup_merge.dart';
+import 'crypto_service.dart';
+import 'firestore_service.dart';
+import 'google_drive_service.dart';
+import 'log_service.dart';
+
+/// Outcome of one [BackupService.runBackup] call, detailed enough to show
+/// directly in a diagnostics UI without needing to cross-reference logs.
+class BackupRunResult {
+  final bool success;
+  final String message;
+  final int todos;
+  final int comments;
+  final int messages;
+  final int stickyNotes;
+
+  const BackupRunResult({
+    required this.success,
+    required this.message,
+    this.todos = 0,
+    this.comments = 0,
+    this.messages = 0,
+    this.stickyNotes = 0,
+  });
+}
+
+/// A read-only snapshot of backup state for manual verification: what the
+/// local cursor thinks has been synced, which generations exist on Drive,
+/// and how the backup's record counts compare to what's currently live in
+/// Firestore.
+class BackupInspection {
+  final BackupCursor cursor;
+  final bool latestExists;
+  final List<int> occupiedGenerations;
+  final int liveTodoCount;
+  final int liveMessageCount;
+  final int liveStickyNoteCount;
+  final int? backupTodoCount;
+  final int? backupMessageCount;
+  final int? backupStickyNoteCount;
+  final String? error;
+
+  const BackupInspection({
+    required this.cursor,
+    required this.latestExists,
+    required this.occupiedGenerations,
+    required this.liveTodoCount,
+    required this.liveMessageCount,
+    required this.liveStickyNoteCount,
+    this.backupTodoCount,
+    this.backupMessageCount,
+    this.backupStickyNoteCount,
+    this.error,
+  });
+}
+
+/// Orchestrates the full-state backup pipeline: fetch deltas since the
+/// local cursor, merge them into a copy of the existing Drive backup,
+/// verify it, then atomically promote it — never mutating the last
+/// known-good backup until the new one is confirmed good.
+class BackupService {
+  final FirestoreService _firestore = FirestoreService();
+  final GoogleDriveService _drive = GoogleDriveService();
+  final AuthService _auth = AuthService();
+  final BackupCursorStore _cursorStore = BackupCursorStore();
+
+  List<Map<String, dynamic>> _sanitizeList(List<Map<String, dynamic>> docs) =>
+      docs.map((d) => sanitizeForJson(d) as Map<String, dynamic>).toList();
+
+  /// Runs one incremental backup cycle. Safe to retry — nothing is
+  /// advanced/promoted unless the run fully succeeds.
+  Future<BackupRunResult> runBackup() async {
+    try {
+      final cursor = await _cursorStore.load();
+
+      final partnerPubKey = await CryptoService().fetchPartnerPublicKey();
+      if (partnerPubKey == null) {
+        const msg = 'Partner public key unavailable, skipping run';
+        LogService.log('Backup: $msg');
+        return const BackupRunResult(success: false, message: msg);
+      }
+      final sharedKey = await CryptoService().getSharedKey(partnerPubKey);
+
+      // 1. Fetch deltas since the cursor (or everything, on the very first
+      // run when the cursor fields are all null).
+      final newTodos =
+          _sanitizeList(await _firestore.fetchTodosSince(coupleId, cursor.todosSyncedAt));
+      final newComments =
+          _sanitizeList(await _firestore.fetchCommentsSince(cursor.commentsSyncedAt));
+      final newMessages = _sanitizeList(
+          await _firestore.fetchMessagesSince(coupleId, cursor.messagesSyncedAt));
+      final newStickyNotes = _sanitizeList(
+          await _firestore.fetchStickyNotesSince(coupleId, cursor.stickyNotesSyncedAt));
+
+      final myUid = _auth.currentUser?.uid;
+      final partnerUid = await _auth.getPartnerUid();
+      final myProfile = myUid != null ? await _firestore.fetchUserDoc(myUid) : null;
+      final partnerProfile =
+          partnerUid != null ? await _firestore.fetchUserDoc(partnerUid) : null;
+      final coupleDocRaw = await _firestore.fetchCoupleDoc(coupleId);
+
+      final deletions = await _firestore.deletionsSince(
+        coupleId,
+        cursor.deletionsSyncedAt ?? DateTime.fromMillisecondsSinceEpoch(0),
+      );
+
+      // 2. Download + decrypt the current backup (or start empty on the
+      // very first run, when nothing exists on Drive yet).
+      final existing = await _downloadAndDecrypt(sharedKey) ?? BackupSnapshot.empty();
+
+      // 3. Merge deltas and apply tombstones.
+      final deletedCommentIds = deletions
+          .where((d) => d.collection.endsWith('/comments'))
+          .map((d) => d.docId)
+          .toSet();
+
+      final mergedTodos = applyTombstones(
+          mergeDelta(existing.todos, newTodos), deletions, 'todos');
+      final mergedComments = mergeDelta(existing.comments, newComments)
+          .where((c) => !deletedCommentIds.contains(c['id']))
+          .toList();
+      final mergedStickyNotes = applyTombstones(
+          mergeDelta(existing.stickyNotes, newStickyNotes), deletions, 'sticky_notes');
+      // Messages have no delete feature today, so no tombstone filter needed.
+      final mergedMessages = mergeDelta(existing.messages, newMessages);
+
+      final profiles = Map<String, dynamic>.from(existing.profiles);
+      if (myUid != null && myProfile != null) {
+        profiles[myUid] = sanitizeForJson(myProfile);
+      }
+      if (partnerUid != null && partnerProfile != null) {
+        profiles[partnerUid] = sanitizeForJson(partnerProfile);
+      }
+
+      final merged = existing.copyWith(
+        generatedAt: DateTime.now(),
+        todos: mergedTodos,
+        comments: mergedComments,
+        messages: mergedMessages,
+        stickyNotes: mergedStickyNotes,
+        profiles: profiles,
+        coupleDoc: coupleDocRaw != null
+            ? sanitizeForJson(coupleDocRaw) as Map<String, dynamic>
+            : existing.coupleDoc,
+      );
+
+      // 4. Encrypt and upload as the pending file — the last known-good
+      // backup is untouched until this is verified.
+      await _encryptAndUpload(merged, sharedKey, BackupConfig.pendingBackupFileName);
+
+      // 5. Integrity check: the backup must never contain fewer live
+      // records than Firestore currently has (it's fine for it to have
+      // more, once purging of old messages is introduced later).
+      final ok = await _verifyIntegrity(merged);
+      if (!ok) {
+        const msg = 'Integrity check failed, aborting promotion';
+        LogService.log('Backup: $msg');
+        return BackupRunResult(
+          success: false,
+          message: msg,
+          todos: mergedTodos.length,
+          comments: mergedComments.length,
+          messages: mergedMessages.length,
+          stickyNotes: mergedStickyNotes.length,
+        );
+      }
+
+      // 6. Rotate existing generations to make room, then promote.
+      await _rotateGenerations();
+      await _drive.renameFileByName(
+          BackupConfig.pendingBackupFileName, BackupConfig.latestBackupFileName);
+
+      // 7. Advance the cursor to the newest timestamp actually observed in
+      // this run's fetched delta — not the device clock, to avoid any
+      // device/server clock-skew gap causing a doc to be missed next run.
+      final newCursor = cursor.copyWith(
+        todosSyncedAt: maxTimestampField(newTodos, 'updatedAt') ?? cursor.todosSyncedAt,
+        commentsSyncedAt:
+            maxTimestampField(newComments, 'createdAt') ?? cursor.commentsSyncedAt,
+        messagesSyncedAt:
+            maxTimestampField(newMessages, 'updatedAt') ?? cursor.messagesSyncedAt,
+        stickyNotesSyncedAt:
+            maxTimestampField(newStickyNotes, 'updatedAt') ?? cursor.stickyNotesSyncedAt,
+        deletionsSyncedAt:
+            deletions.isNotEmpty ? deletions.last.deletedAt : cursor.deletionsSyncedAt,
+        lastBackupAt: DateTime.now(),
+      );
+      await _cursorStore.save(newCursor);
+
+      // 8. Prune tombstones this run has now safely captured.
+      if (newCursor.deletionsSyncedAt != null) {
+        await _firestore.pruneDeletionsBefore(coupleId, newCursor.deletionsSyncedAt!);
+      }
+
+      final msg =
+          'Backup completed — ${mergedTodos.length} todos, ${mergedComments.length} comments, ${mergedMessages.length} messages, ${mergedStickyNotes.length} sticky notes';
+      LogService.log('Backup: $msg');
+      return BackupRunResult(
+        success: true,
+        message: msg,
+        todos: mergedTodos.length,
+        comments: mergedComments.length,
+        messages: mergedMessages.length,
+        stickyNotes: mergedStickyNotes.length,
+      );
+    } catch (e) {
+      final msg = 'Run failed: $e';
+      LogService.log('Backup Error: $msg');
+      return BackupRunResult(success: false, message: msg);
+    }
+  }
+
+  /// Downloads and decrypts the latest Drive backup, merges it with
+  /// whatever's currently live in Firestore (live wins conflicts).
+  ///
+  /// By default also resets the local cursor so the next scheduled backup
+  /// continues incrementally from here rather than re-diffing everything —
+  /// this is the real reinstall-restore behavior. Pass [dryRun]: true (used
+  /// by the diagnostics "Restore Preview" action) to compute the same merge
+  /// for inspection without touching the cursor at all.
+  ///
+  /// Returns null if no backup exists yet on Drive. Note: this returns the
+  /// merged snapshot for the caller to hydrate into a local cache — it does
+  /// not itself write to a local store, since that piece (the message/todo
+  /// local cache) is a separate, not-yet-built part of this project.
+  Future<BackupSnapshot?> restoreFromBackup({bool dryRun = false}) async {
+    try {
+      final partnerPubKey = await CryptoService().fetchPartnerPublicKey();
+      if (partnerPubKey == null) {
+        LogService.log('Backup: partner public key unavailable, cannot restore');
+        return null;
+      }
+      final sharedKey = await CryptoService().getSharedKey(partnerPubKey);
+
+      final backup = await _downloadAndDecrypt(sharedKey);
+      if (backup == null) {
+        LogService.log('Backup: no existing backup found to restore');
+        return null;
+      }
+
+      final liveTodos = _sanitizeList(await _firestore.fetchTodosSince(coupleId, null));
+      final liveComments = _sanitizeList(await _firestore.fetchCommentsSince(null));
+      final liveMessages =
+          _sanitizeList(await _firestore.fetchMessagesSince(coupleId, null));
+      final liveStickyNotes =
+          _sanitizeList(await _firestore.fetchStickyNotesSince(coupleId, null));
+
+      final merged = backup.copyWith(
+        todos: mergeDelta(backup.todos, liveTodos),
+        comments: mergeDelta(backup.comments, liveComments),
+        messages: mergeDelta(backup.messages, liveMessages),
+        stickyNotes: mergeDelta(backup.stickyNotes, liveStickyNotes),
+      );
+
+      if (!dryRun) {
+        final now = DateTime.now();
+        await _cursorStore.save(BackupCursor(
+          todosSyncedAt: maxTimestampField(liveTodos, 'updatedAt') ?? now,
+          commentsSyncedAt: maxTimestampField(liveComments, 'createdAt') ?? now,
+          messagesSyncedAt: maxTimestampField(liveMessages, 'updatedAt') ?? now,
+          stickyNotesSyncedAt: maxTimestampField(liveStickyNotes, 'updatedAt') ?? now,
+          deletionsSyncedAt: now,
+          lastBackupAt: now,
+        ));
+      }
+
+      LogService.log(
+          'Backup: restore${dryRun ? " (dry run)" : ""} merged ${merged.todos.length} todos, ${merged.messages.length} messages, ${merged.stickyNotes.length} sticky notes');
+      return merged;
+    } catch (e) {
+      LogService.log('Backup Error: restore failed: $e');
+      return null;
+    }
+  }
+
+  // ── Internal helpers ─────────────────────────────────────────────────────
+
+  Future<BackupSnapshot?> _downloadAndDecrypt(SecretKey sharedKey) async {
+    final bytes = await _drive.downloadBytesByName(BackupConfig.latestBackupFileName);
+    if (bytes == null) return null;
+    final envelope = jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
+    final plainBytes = await CryptoService().decryptBytes(envelope, sharedKey);
+    final json = jsonDecode(utf8.decode(plainBytes)) as Map<String, dynamic>;
+    return BackupSnapshot.fromJson(json);
+  }
+
+  Future<void> _encryptAndUpload(
+      BackupSnapshot snapshot, SecretKey sharedKey, String fileName) async {
+    final plainBytes = utf8.encode(jsonEncode(snapshot.toJson()));
+    final envelope =
+        await CryptoService().encryptBytes(Uint8List.fromList(plainBytes), sharedKey);
+    final encryptedBytes = utf8.encode(jsonEncode(envelope));
+    await _drive.uploadOrReplaceBytes(fileName, Uint8List.fromList(encryptedBytes));
+  }
+
+  Future<bool> _verifyIntegrity(BackupSnapshot merged) async {
+    final liveTodoCount = await _firestore.countTodos(coupleId);
+    final liveMessageCount = await _firestore.countMessages(coupleId);
+    final liveStickyNoteCount = await _firestore.countStickyNotes(coupleId);
+
+    // ">=" rather than "==": once old messages start getting purged from
+    // Firestore, the backup will legitimately hold more than what's live.
+    // It should never hold fewer than what's currently live, though.
+    return merged.todos.length >= liveTodoCount &&
+        merged.messages.length >= liveMessageCount &&
+        merged.stickyNotes.length >= liveStickyNoteCount;
+  }
+
+  Future<void> _rotateGenerations() async {
+    final latestId = await _drive.findFileIdByName(BackupConfig.latestBackupFileName);
+    var occupiedGenerations = 0;
+    for (var i = 1; i <= BackupConfig.maxBackupGenerations; i++) {
+      final id = await _drive.findFileIdByName(BackupConfig.backupGenerationFileName(i));
+      if (id == null) break;
+      occupiedGenerations = i;
+    }
+
+    final plan = computeRotationPlan(
+      latestOccupied: latestId != null,
+      occupiedGenerations: occupiedGenerations,
+      maxGenerations: BackupConfig.maxBackupGenerations,
+      generationFileName: BackupConfig.backupGenerationFileName,
+      latestFileName: BackupConfig.latestBackupFileName,
+    );
+
+    for (final op in plan) {
+      if (op.type == RotationOpType.delete) {
+        await _drive.deleteFileByName(op.from);
+      } else {
+        await _drive.renameFileByName(op.from, op.to!);
+      }
+    }
+  }
+
+  /// Read-only snapshot of backup state for manual verification — what the
+  /// local cursor thinks has synced, which generations exist on Drive, and
+  /// how the backup's counts compare to what's currently live in Firestore.
+  /// Never mutates anything (no promotion, no cursor changes).
+  Future<BackupInspection> inspect() async {
+    final cursor = await _cursorStore.load();
+    final latestId = await _drive.findFileIdByName(BackupConfig.latestBackupFileName);
+    final occupied = <int>[];
+    for (var i = 1; i <= BackupConfig.maxBackupGenerations; i++) {
+      final id = await _drive.findFileIdByName(BackupConfig.backupGenerationFileName(i));
+      if (id != null) occupied.add(i);
+    }
+
+    final liveTodoCount = await _firestore.countTodos(coupleId);
+    final liveMessageCount = await _firestore.countMessages(coupleId);
+    final liveStickyNoteCount = await _firestore.countStickyNotes(coupleId);
+
+    int? backupTodoCount, backupMessageCount, backupStickyNoteCount;
+    String? error;
+    if (latestId != null) {
+      try {
+        final partnerPubKey = await CryptoService().fetchPartnerPublicKey();
+        if (partnerPubKey != null) {
+          final sharedKey = await CryptoService().getSharedKey(partnerPubKey);
+          final snap = await _downloadAndDecrypt(sharedKey);
+          if (snap != null) {
+            backupTodoCount = snap.todos.length;
+            backupMessageCount = snap.messages.length;
+            backupStickyNoteCount = snap.stickyNotes.length;
+          }
+        }
+      } catch (e) {
+        error = 'Could not decrypt existing backup for inspection: $e';
+      }
+    }
+
+    return BackupInspection(
+      cursor: cursor,
+      latestExists: latestId != null,
+      occupiedGenerations: occupied,
+      liveTodoCount: liveTodoCount,
+      liveMessageCount: liveMessageCount,
+      liveStickyNoteCount: liveStickyNoteCount,
+      backupTodoCount: backupTodoCount,
+      backupMessageCount: backupMessageCount,
+      backupStickyNoteCount: backupStickyNoteCount,
+      error: error,
+    );
+  }
+}

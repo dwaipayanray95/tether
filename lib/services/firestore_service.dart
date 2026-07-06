@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../models/todo_model.dart';
 import '../models/comment_model.dart';
 import '../models/message_model.dart';
+import '../models/deletion_record_model.dart';
 import 'fcm_service.dart';
 import 'log_service.dart';
 import 'crypto_service.dart';
@@ -80,11 +81,18 @@ class FirestoreService {
       checklist: checklistEnc,
     );
 
+    // 'updatedAt' is bookkeeping only, not part of TodoItem — the backup
+    // pipeline's incremental delta queries (`where updatedAt > cursor`)
+    // depend on every mutating write touching it, since createdAt alone
+    // doesn't change on edits.
     await _db
         .collection('couples')
         .doc(coupleId)
         .collection('todos')
-        .add(encryptedTodo.toMap());
+        .add({
+      ...encryptedTodo.toMap(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
     final auth = AuthService();
     final senderName = auth.myName;
     final partnerName = auth.partnerName.toLowerCase();
@@ -106,6 +114,7 @@ class FirestoreService {
         .update({
       'isDone': nextIsDone,
       'completedAt': nextIsDone ? DateTime.now().toIso8601String() : null,
+      'updatedAt': FieldValue.serverTimestamp(),
     });
     
     final email = FirebaseAuth.instance.currentUser?.email;
@@ -123,7 +132,10 @@ class FirestoreService {
         .doc(coupleId)
         .collection('todos')
         .doc(todoId)
-        .update({'details': detailsEnc});
+        .update({
+      'details': detailsEnc,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
   }
 
   Future<void> updateTodoChecklist(
@@ -139,6 +151,7 @@ class FirestoreService {
         .doc(todoId)
         .update({
       'checklist': checklistEnc.map((item) => item.toMap()).toList(),
+      'updatedAt': FieldValue.serverTimestamp(),
     });
   }
 
@@ -158,6 +171,7 @@ class FirestoreService {
     } else if (dueDate != null) {
       updates['dueDate'] = dueDate.toIso8601String();
     }
+    updates['updatedAt'] = FieldValue.serverTimestamp();
     await _db
         .collection('couples')
         .doc(coupleId)
@@ -166,13 +180,14 @@ class FirestoreService {
         .update(updates);
   }
 
-  Future<void> deleteTodo(String coupleId, String todoId) {
-    return _db
+  Future<void> deleteTodo(String coupleId, String todoId) async {
+    await _db
         .collection('couples')
         .doc(coupleId)
         .collection('todos')
         .doc(todoId)
         .delete();
+    await _recordDeletion(coupleId, 'todos', todoId);
   }
 
   // ── Todo Comments ─────────────────────────────────────────────────────────
@@ -218,8 +233,8 @@ class FirestoreService {
   }
 
   Future<void> deleteComment(
-      String coupleId, String todoId, String commentId) {
-    return _db
+      String coupleId, String todoId, String commentId) async {
+    await _db
         .collection('couples')
         .doc(coupleId)
         .collection('todos')
@@ -227,6 +242,7 @@ class FirestoreService {
         .collection('comments')
         .doc(commentId)
         .delete();
+    await _recordDeletion(coupleId, 'todos/$todoId/comments', commentId);
   }
 
   // ── Chat ──────────────────────────────────────────────────────────────────
@@ -280,7 +296,10 @@ class FirestoreService {
         .collection('couples')
         .doc(coupleId)
         .collection('messages')
-        .add(message.toMap());
+        .add({
+      ...message.toMap(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
     if (senderName.isNotEmpty) {
       final partnerName = senderName == 'Ray' ? 'aproo' : 'ray';
       final String preview;
@@ -315,6 +334,7 @@ class FirestoreService {
         batch.update(doc.reference, {
           'readBy': FieldValue.arrayUnion([myUid]),
           'readTimes.$myUid': DateTime.now().toIso8601String(),
+          'updatedAt': FieldValue.serverTimestamp(),
         });
       }
     }
@@ -358,7 +378,10 @@ class FirestoreService {
     } else {
       rawReactions[emoji] = uids;
     }
-    await ref.update({'reactions': rawReactions});
+    await ref.update({
+      'reactions': rawReactions,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
   }
 
   // ── Presence / last seen ─────────────────────────────────────────────────
@@ -431,6 +454,7 @@ class FirestoreService {
       'createdByName': createdByName,
       'colorIndex': colorIndex,
       'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
     });
   }
 
@@ -443,6 +467,7 @@ class FirestoreService {
         .update({
       'isArchived': true,
       'archivedAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
     });
   }
 
@@ -455,6 +480,7 @@ class FirestoreService {
         .update({
       'isArchived': false,
       'archivedAt': null,
+      'updatedAt': FieldValue.serverTimestamp(),
     });
   }
 
@@ -465,6 +491,53 @@ class FirestoreService {
         .collection('sticky_notes')
         .doc(noteId)
         .delete();
+    await _recordDeletion(coupleId, 'sticky_notes', noteId);
+  }
+
+  // ── Deletion tombstones (for backup sync) ───────────────────────────────
+  //
+  // Cursor-based "what's new since X" queries never see deletions — a
+  // removed doc simply stops appearing, it doesn't show up as a change. The
+  // backup pipeline needs these tombstones to apply removals to the backup
+  // copy without re-reading entire collections to diff them.
+
+  Future<void> _recordDeletion(
+      String coupleId, String collection, String docId) {
+    return _db.collection('couples').doc(coupleId).collection('deletions').add({
+      'collection': collection,
+      'docId': docId,
+      'deletedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Future<List<DeletionRecord>> deletionsSince(
+      String coupleId, DateTime since) async {
+    final snap = await _db
+        .collection('couples')
+        .doc(coupleId)
+        .collection('deletions')
+        .where('deletedAt', isGreaterThan: Timestamp.fromDate(since))
+        .orderBy('deletedAt')
+        .get();
+    return snap.docs.map((d) => DeletionRecord.fromMap(d.data())).toList();
+  }
+
+  /// Tombstones only need to outlive the longest gap between successful
+  /// backup runs. Call this after a backup run has confirmed it processed
+  /// everything up to [before].
+  Future<void> pruneDeletionsBefore(String coupleId, DateTime before) async {
+    final snap = await _db
+        .collection('couples')
+        .doc(coupleId)
+        .collection('deletions')
+        .where('deletedAt', isLessThan: Timestamp.fromDate(before))
+        .get();
+    if (snap.docs.isEmpty) return;
+    final batch = _db.batch();
+    for (final doc in snap.docs) {
+      batch.delete(doc.reference);
+    }
+    await batch.commit();
   }
 
   // ── Couple profile ────────────────────────────────────────────────────────
@@ -534,5 +607,118 @@ class FirestoreService {
       },
       SetOptions(merge: true),
     );
+  }
+
+  // ── Backup pipeline: bounded delta fetches ──────────────────────────────
+  //
+  // One-time `.get()` queries scoped by an "updated since" cursor, so the
+  // backup pipeline only reads what's changed rather than re-reading whole
+  // collections on every run. A null [since] means "everything" (first
+  // backup ever, when there's no cursor yet).
+
+  Query<Map<String, dynamic>> _sinceQuery(
+      Query<Map<String, dynamic>> query, String field, DateTime? since) {
+    if (since == null) return query;
+    return query.where(field, isGreaterThan: Timestamp.fromDate(since));
+  }
+
+  Future<List<Map<String, dynamic>>> fetchTodosSince(
+      String coupleId, DateTime? since) async {
+    final query = _sinceQuery(
+        _db.collection('couples').doc(coupleId).collection('todos'),
+        'updatedAt',
+        since);
+    final snap = await query.get();
+    return snap.docs.map((d) => {'id': d.id, ...d.data()}).toList();
+  }
+
+  /// Comments never get edited after creation (only deleted, which is
+  /// covered by tombstones), so createdAt is a valid delta cursor for them
+  /// without needing a separate updatedAt field.
+  ///
+  /// Uses a collectionGroup query to fetch across every todo's comments
+  /// subcollection in one query rather than enumerating todo IDs first.
+  /// Safe here because this Firebase project only ever has the one couple
+  /// this app is built for — a collectionGroup query would need explicit
+  /// per-couple filtering in a multi-tenant project.
+  Future<List<Map<String, dynamic>>> fetchCommentsSince(
+      DateTime? since) async {
+    final query = _sinceQuery(
+        _db.collectionGroup('comments'), 'createdAt', since);
+    final snap = await query.get();
+    return snap.docs
+        .map((d) => {
+              'id': d.id,
+              'todoId': d.reference.parent.parent!.id,
+              ...d.data(),
+            })
+        .toList();
+  }
+
+  Future<List<Map<String, dynamic>>> fetchMessagesSince(
+      String coupleId, DateTime? since) async {
+    final query = _sinceQuery(
+        _db.collection('couples').doc(coupleId).collection('messages'),
+        'updatedAt',
+        since);
+    final snap = await query.get();
+    return snap.docs.map((d) => {'id': d.id, ...d.data()}).toList();
+  }
+
+  Future<List<Map<String, dynamic>>> fetchStickyNotesSince(
+      String coupleId, DateTime? since) async {
+    final query = _sinceQuery(
+        _db.collection('couples').doc(coupleId).collection('sticky_notes'),
+        'updatedAt',
+        since);
+    final snap = await query.get();
+    return snap.docs.map((d) => {'id': d.id, ...d.data()}).toList();
+  }
+
+  Future<Map<String, dynamic>?> fetchUserDoc(String uid) async {
+    final snap = await _db.collection('users').doc(uid).get();
+    return snap.data();
+  }
+
+  Future<Map<String, dynamic>?> fetchCoupleDoc(String coupleId) async {
+    final snap = await _db.collection('couples').doc(coupleId).get();
+    return snap.data();
+  }
+
+  // ── Backup pipeline: cheap integrity counts ─────────────────────────────
+  //
+  // Firestore's count() aggregation returns a collection's document count
+  // for a flat, minimal cost — it does not read every doc — so this is
+  // safe to use as a post-backup sanity check without reintroducing the
+  // read-volume problem the backup pipeline exists to avoid.
+
+  Future<int> countTodos(String coupleId) async {
+    final agg = await _db
+        .collection('couples')
+        .doc(coupleId)
+        .collection('todos')
+        .count()
+        .get();
+    return agg.count ?? 0;
+  }
+
+  Future<int> countMessages(String coupleId) async {
+    final agg = await _db
+        .collection('couples')
+        .doc(coupleId)
+        .collection('messages')
+        .count()
+        .get();
+    return agg.count ?? 0;
+  }
+
+  Future<int> countStickyNotes(String coupleId) async {
+    final agg = await _db
+        .collection('couples')
+        .doc(coupleId)
+        .collection('sticky_notes')
+        .count()
+        .get();
+    return agg.count ?? 0;
   }
 }

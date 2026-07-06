@@ -7,6 +7,8 @@ import '../services/fcm_service.dart';
 import '../services/auth_service.dart';
 import '../services/crypto_service.dart';
 import '../services/google_drive_service.dart';
+import '../services/backup_service.dart';
+import '../services/foreground_backup_scheduler.dart';
 import '../theme/app_theme.dart';
 
 class DiagnosticsScreen extends StatefulWidget {
@@ -67,6 +69,32 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
             title: 'E2EE Encryption Test',
             subtitle: 'Checks encryption status and tests secure channel',
             onTap: _testE2EE,
+          ),
+          const SizedBox(height: 24),
+          _buildSectionHeader('Backup'),
+          _buildTile(
+            icon: Icons.backup_rounded,
+            title: 'Run Backup Now',
+            subtitle: 'Manually triggers one incremental backup cycle',
+            onTap: _runBackupNow,
+          ),
+          _buildTile(
+            icon: Icons.visibility_rounded,
+            title: 'Inspect Backup State',
+            subtitle: 'Shows cursor, Drive generations, and live-vs-backup counts',
+            onTap: _inspectBackup,
+          ),
+          _buildTile(
+            icon: Icons.restore_rounded,
+            title: 'Restore Preview',
+            subtitle: 'Downloads + merges backup with live data (does not apply it)',
+            onTap: _previewRestore,
+          ),
+          _buildTile(
+            icon: Icons.schedule_rounded,
+            title: 'Run Backup If Due',
+            subtitle: 'Exercises the real 24h due-check used on app open/resume',
+            onTap: _runBackupIfDue,
           ),
         ],
       ),
@@ -276,6 +304,138 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
     );
   }
 
+  Future<void> _runBackupNow() async {
+    LogService.log('Diagnostics: manually triggering backup run');
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator(color: AppTheme.primary)),
+    );
+
+    final result = await BackupService().runBackup();
+
+    if (mounted) Navigator.pop(context); // dismiss loader
+    if (!mounted) return;
+
+    _showResultDialog(
+      title: 'Backup Run Result',
+      success: result.success,
+      message: result.success
+          ? '${result.message}\n\nTotals now in backup: ${result.todos} todos, '
+              '${result.comments} comments, ${result.messages} messages, '
+              '${result.stickyNotes} sticky notes.'
+          : result.message,
+    );
+  }
+
+  Future<void> _inspectBackup() async {
+    LogService.log('Diagnostics: inspecting backup state');
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator(color: AppTheme.primary)),
+    );
+
+    final inspection = await BackupService().inspect();
+
+    if (mounted) Navigator.pop(context); // dismiss loader
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: Text('Backup State', style: GoogleFonts.playfairDisplay(fontWeight: FontWeight.bold)),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Drive files', style: GoogleFonts.dmSans(fontWeight: FontWeight.w700)),
+              Text(
+                inspection.latestExists
+                    ? 'latest_backup exists'
+                    : 'latest_backup does NOT exist yet (no backup run yet)',
+              ),
+              Text('Occupied prior generations: ${inspection.occupiedGenerations.isEmpty ? "none" : inspection.occupiedGenerations.join(", ")}'),
+              const SizedBox(height: 12),
+              Text('Counts (backup vs. live Firestore)', style: GoogleFonts.dmSans(fontWeight: FontWeight.w700)),
+              Text('Todos: ${inspection.backupTodoCount ?? "—"} vs ${inspection.liveTodoCount}'),
+              Text('Messages: ${inspection.backupMessageCount ?? "—"} vs ${inspection.liveMessageCount}'),
+              Text('Sticky notes: ${inspection.backupStickyNoteCount ?? "—"} vs ${inspection.liveStickyNoteCount}'),
+              const SizedBox(height: 12),
+              Text('Local cursor', style: GoogleFonts.dmSans(fontWeight: FontWeight.w700)),
+              Text('Todos synced at: ${inspection.cursor.todosSyncedAt ?? "never"}'),
+              Text('Messages synced at: ${inspection.cursor.messagesSyncedAt ?? "never"}'),
+              Text('Sticky notes synced at: ${inspection.cursor.stickyNotesSyncedAt ?? "never"}'),
+              Text('Last backup at: ${inspection.cursor.lastBackupAt ?? "never"}'),
+              if (inspection.error != null) ...[
+                const SizedBox(height: 12),
+                Text(inspection.error!,
+                    style: const TextStyle(fontSize: 12, color: Colors.red)),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _previewRestore() async {
+    LogService.log('Diagnostics: previewing restore-from-backup');
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator(color: AppTheme.primary)),
+    );
+
+    final merged = await BackupService().restoreFromBackup(dryRun: true);
+
+    if (mounted) Navigator.pop(context); // dismiss loader
+    if (!mounted) return;
+
+    _showResultDialog(
+      title: 'Restore Preview',
+      success: merged != null,
+      message: merged != null
+          ? 'Merged backup + live Firestore would produce: '
+              '${merged.todos.length} todos, ${merged.comments.length} comments, '
+              '${merged.messages.length} messages, ${merged.stickyNotes.length} sticky notes.\n\n'
+              'True dry run — nothing was applied to a local cache (that piece '
+              'isn\'t built yet) and the sync cursor was left untouched.'
+          : 'No backup found on Drive, or partner key unavailable — check logs.',
+    );
+  }
+
+  Future<void> _runBackupIfDue() async {
+    LogService.log('Diagnostics: running the real due-check used on app open/resume');
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator(color: AppTheme.primary)),
+    );
+
+    await ForegroundBackupScheduler.runIfDue();
+
+    if (mounted) Navigator.pop(context); // dismiss loader
+    if (!mounted) return;
+
+    _showResultDialog(
+      title: 'Due-Check Complete',
+      success: true,
+      message:
+          'Ran the same check that fires on every app open/resume: skips '
+          'if the last backup was under 24h ago, otherwise runs one. Check '
+          'the app log or "Inspect Backup State" to see which happened.',
+    );
+  }
+
   Widget _buildCheckrow(String label, bool isOk) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -313,7 +473,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
               color: success ? Colors.green : Colors.red,
             ),
             const SizedBox(width: 8),
-            Text(title),
+            Expanded(child: Text(title)),
           ],
         ),
         content: Text(message),

@@ -22,6 +22,17 @@ service cloud.firestore {
       allow read, write: if isAllowed();
     }
 
+    // Collection-group query support: the backup pipeline fetches comments
+    // across every todo in one query (collectionGroup('comments')) rather
+    // than enumerating todo IDs first. A nested match under
+    // couples/{coupleId}/{document=**} authorizes path-anchored queries
+    // fine, but Firestore requires a rule declared at this top level,
+    // scoped to the collection ID directly, to authorize a collection-group
+    // query against it.
+    match /{path=**}/comments/{commentId} {
+      allow read, write: if isAllowed();
+    }
+
     // Deny everything else
     match /{document=**} {
       allow read, write: if false;

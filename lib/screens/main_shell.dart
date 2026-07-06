@@ -16,6 +16,7 @@ import '../services/auth_service.dart';
 import '../services/log_service.dart';
 import '../services/google_drive_service.dart';
 import '../services/crypto_service.dart';
+import '../services/foreground_backup_scheduler.dart';
 import '../config/env_config.dart';
 import '../config/google_scopes.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -68,6 +69,8 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       await _restorePrefsFromCloud();
       // Ensure E2EE is set up and key is backed up
       await _checkE2EESetup();
+      // Run the full-state backup if it's been due 24h+ since the last one
+      await ForegroundBackupScheduler.runIfDue();
     });
   }
 
@@ -371,6 +374,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         _firestore.updatePresence(_myPresenceKey);
         _updateBatteryStatus();
         _checkForUpdate();
+        ForegroundBackupScheduler.runIfDue();
         WidgetsBinding.instance.addPostFrameCallback((_) {
           _handlePendingNotification();
         });

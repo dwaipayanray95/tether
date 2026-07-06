@@ -128,7 +128,7 @@ class GoogleDriveService {
     try {
       LogService.log('Google Drive: Deleting file $fileId');
       final token = await _getAccessToken();
-      
+
       await _dio.delete(
         'https://www.googleapis.com/drive/v3/files/$fileId',
         options: Options(headers: {'Authorization': 'Bearer $token'}),
@@ -139,6 +139,140 @@ class GoogleDriveService {
       LogService.log('Google Drive Error: Failed to delete file: $e');
       return false;
     }
+  }
+
+  // ── Generic named-file helpers (backup pipeline) ────────────────────────
+  //
+  // Unlike uploadSnap/backupPreferences/backupKeyBackup above (each
+  // hardcoded to one filename), these operate on an arbitrary filename
+  // within the Tether folder, since the backup pipeline needs to find,
+  // write, rename, and delete files by the generation names in
+  // BackupConfig (latest_backup, backup_gen1/2/3, etc).
+
+  Future<String?> findFileIdByName(String fileName) async {
+    final token = await _getAccessToken();
+    final parentId = await _getOrCreateFolder(token, 'Tether');
+    return _findFileIdInFolder(token, parentId, fileName);
+  }
+
+  Future<String?> _findFileIdInFolder(
+      String token, String parentId, String fileName) async {
+    final response = await _dio.get(
+      'https://www.googleapis.com/drive/v3/files',
+      queryParameters: {
+        'q': "name = '$fileName' and '$parentId' in parents and trashed = false",
+        'fields': 'files(id)',
+      },
+      options: Options(headers: {'Authorization': 'Bearer $token'}),
+    );
+    final files = response.data['files'] as List?;
+    if (files == null || files.isEmpty) return null;
+    return files.first['id'] as String;
+  }
+
+  /// Uploads [bytes] as [fileName] in the Tether folder, replacing it if a
+  /// file with that name already exists.
+  Future<void> uploadOrReplaceBytes(String fileName, Uint8List bytes,
+      {String mimeType = 'application/octet-stream'}) async {
+    final token = await _getAccessToken();
+    final parentId = await _getOrCreateFolder(token, 'Tether');
+    final existingId = await _findFileIdInFolder(token, parentId, fileName);
+
+    if (existingId != null) {
+      await _dio.patch(
+        'https://www.googleapis.com/upload/drive/v3/files/$existingId?uploadType=media',
+        data: Stream.fromIterable([bytes]),
+        options: Options(headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': mimeType,
+          'Content-Length': bytes.length.toString(),
+        }),
+      );
+      return;
+    }
+
+    final metadata = jsonEncode({'name': fileName, 'parents': [parentId]});
+    const boundary = 'tether_boundary';
+    final header =
+        '\r\n--$boundary\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n$metadata\r\n--$boundary\r\nContent-Type: $mimeType\r\n\r\n';
+    const footer = '\r\n--$boundary--\r\n';
+    final bodyBytes = [
+      ...utf8.encode(header),
+      ...bytes,
+      ...utf8.encode(footer),
+    ];
+    await _dio.post(
+      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
+      data: Stream.fromIterable([bodyBytes]),
+      options: Options(headers: {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'multipart/related; boundary=$boundary',
+        'Content-Length': bodyBytes.length.toString(),
+      }),
+    );
+  }
+
+  /// Downloads [fileName] from the Tether folder, or null if it doesn't exist.
+  Future<Uint8List?> downloadBytesByName(String fileName) async {
+    final token = await _getAccessToken();
+    final parentId = await _getOrCreateFolder(token, 'Tether');
+    final fileId = await _findFileIdInFolder(token, parentId, fileName);
+    if (fileId == null) return null;
+
+    final response = await _dio.get<List<int>>(
+      'https://www.googleapis.com/drive/v3/files/$fileId?alt=media',
+      options: Options(
+        headers: {'Authorization': 'Bearer $token'},
+        responseType: ResponseType.bytes,
+      ),
+    );
+    return Uint8List.fromList(response.data ?? []);
+  }
+
+  /// Renames [fileName] to [newName] within the Tether folder. If
+  /// [fileName] doesn't exist, this is a no-op (returns false).
+  ///
+  /// Unlike a real filesystem, Drive allows multiple files with the same
+  /// name in one folder — if a prior rotation run was interrupted partway,
+  /// [newName] might already be occupied by a stale file. Clear it first
+  /// so a retry can never produce ambiguous duplicate-named files.
+  Future<bool> renameFileByName(String fileName, String newName) async {
+    final token = await _getAccessToken();
+    final parentId = await _getOrCreateFolder(token, 'Tether');
+    final fileId = await _findFileIdInFolder(token, parentId, fileName);
+    if (fileId == null) return false;
+
+    final staleId = await _findFileIdInFolder(token, parentId, newName);
+    if (staleId != null) {
+      await _dio.delete(
+        'https://www.googleapis.com/drive/v3/files/$staleId',
+        options: Options(headers: {'Authorization': 'Bearer $token'}),
+      );
+    }
+
+    await _dio.patch(
+      'https://www.googleapis.com/drive/v3/files/$fileId',
+      data: {'name': newName},
+      options: Options(headers: {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+      }),
+    );
+    return true;
+  }
+
+  /// Deletes [fileName] within the Tether folder if it exists.
+  Future<bool> deleteFileByName(String fileName) async {
+    final token = await _getAccessToken();
+    final parentId = await _getOrCreateFolder(token, 'Tether');
+    final fileId = await _findFileIdInFolder(token, parentId, fileName);
+    if (fileId == null) return false;
+
+    await _dio.delete(
+      'https://www.googleapis.com/drive/v3/files/$fileId',
+      options: Options(headers: {'Authorization': 'Bearer $token'}),
+    );
+    return true;
   }
 
   // ── SharedPreferences Settings Backup ──────────────────────────────────────

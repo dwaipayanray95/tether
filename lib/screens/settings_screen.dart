@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:timeago/timeago.dart' as timeago;
+import '../models/backup_cursor_model.dart';
 import '../services/auth_service.dart';
+import '../services/backup_cursor_store.dart';
 import '../theme/app_theme.dart';
 import 'diagnostics_screen.dart';
 import 'partner_info_screen.dart';
@@ -44,6 +47,25 @@ class SettingsScreen extends StatelessWidget {
             title: 'Memories',
             subtitle: 'Coming soon...',
             onTap: () {},
+          ),
+          const SizedBox(height: 24),
+          _buildSectionHeader('Backup'),
+          FutureBuilder<BackupCursor>(
+            future: BackupCursorStore().load(),
+            builder: (context, snap) {
+              final lastBackupAt = snap.data?.lastBackupAt;
+              return _buildTile(
+                icon: Icons.cloud_done_rounded,
+                title: 'Last Backup',
+                subtitle: lastBackupAt != null
+                    ? 'Backed up ${timeago.format(lastBackupAt)} to Google Drive'
+                    : 'Never backed up yet',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const DiagnosticsScreen()),
+                ),
+              );
+            },
           ),
           const SizedBox(height: 24),
           _buildSectionHeader('Diagnostics'),
