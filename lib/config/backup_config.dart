@@ -16,4 +16,17 @@ class BackupConfig {
 
   static String backupGenerationFileName(int generation) =>
       'backup_gen$generation.json.enc';
+
+  /// Explicit allowlist of SharedPreferences keys included in the backup
+  /// snapshot's `preferences` field. Deliberately an allowlist, not a
+  /// denylist of things to exclude — SharedPreferences also holds this
+  /// app's own internal bookkeeping (the backup cursor itself, the local
+  /// "E2EE verified" flag, cached location fixes) that must never be
+  /// backed up or restored: restoring an old device's cursor/flags onto a
+  /// different device, or a stale cached location after a reinstall,
+  /// would actively cause bugs. Add a key here only when it's a genuine
+  /// user-facing setting.
+  static const List<String> backedUpPreferenceKeys = [
+    'logging_enabled',
+  ];
 }

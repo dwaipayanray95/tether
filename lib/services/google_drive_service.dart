@@ -13,8 +13,14 @@ class GoogleDriveService {
   // authorizeScopes() (the interactive grant) to be triggered by a real user
   // tap, so it must never be called from this background path — doing so
   // was the cause of the Google consent screen popping up repeatedly.
-  // If the scope isn't cached, callers should surface a re-login prompt
-  // (see MainShell._validateGoogleScopes) rather than requesting it here.
+  //
+  // This is also the app's only scope-validity check — there's no separate
+  // proactive/periodic scan for missing scopes. If a future update adds a
+  // new required scope, a signed-in user just won't have it cached yet;
+  // the first Drive call that actually needs it lands here, finds it
+  // missing, and signs them out so the normal login flow re-requests the
+  // full current scope set. That's lazy/reactive rather than checked on
+  // every app open, matching how most Google Sign-In apps behave.
   Future<String> _getAccessToken() async {
     LogService.log('Google Drive: Obtaining access token');
     final googleUser = await _auth.getGoogleUser();
@@ -26,7 +32,8 @@ class GoogleDriveService {
     final authorization = await googleUser.authorizationClient.authorizationForScopes(GoogleScopes.drive);
     final token = authorization?.accessToken;
     if (token == null) {
-      LogService.log('Google Drive Error: Drive scopes not authorized. User needs to re-authenticate.');
+      LogService.log('Google Drive Error: Drive scopes not authorized. Signing out to force re-consent on next login.');
+      await _auth.signOut();
       throw Exception('Google Drive access not authorized. Please sign in again.');
     }
 
@@ -143,8 +150,8 @@ class GoogleDriveService {
 
   // ── Generic named-file helpers (backup pipeline) ────────────────────────
   //
-  // Unlike uploadSnap/backupPreferences/backupKeyBackup above (each
-  // hardcoded to one filename), these operate on an arbitrary filename
+  // Unlike uploadSnap/backupKeyBackup above (each hardcoded to one
+  // filename), these operate on an arbitrary filename
   // within the Tether folder, since the backup pipeline needs to find,
   // write, rename, and delete files by the generation names in
   // BackupConfig (latest_backup, backup_gen1/2/3, etc).
@@ -273,109 +280,6 @@ class GoogleDriveService {
       options: Options(headers: {'Authorization': 'Bearer $token'}),
     );
     return true;
-  }
-
-  // ── SharedPreferences Settings Backup ──────────────────────────────────────
-
-  Future<void> backupPreferences(Map<String, dynamic> prefs) async {
-    try {
-      LogService.log('Google Drive: Backing up user preferences to Tether/tether_preferences.json');
-      final token = await _getAccessToken();
-      final parentId = await _getOrCreateFolder(token, 'Tether');
-      
-      // Look for existing backup file in Tether folder
-      final searchResponse = await _dio.get(
-        'https://www.googleapis.com/drive/v3/files',
-        queryParameters: {
-          'q': "name = 'tether_preferences.json' and '$parentId' in parents and trashed = false",
-          'fields': 'files(id)',
-        },
-        options: Options(headers: {'Authorization': 'Bearer $token'}),
-      );
-
-      final files = searchResponse.data['files'] as List?;
-      final jsonContent = jsonEncode(prefs);
-      final jsonBytes = utf8.encode(jsonContent);
-
-      if (files != null && files.isNotEmpty) {
-        // Update existing file
-        final fileId = files.first['id'] as String;
-        await _dio.patch(
-          'https://www.googleapis.com/upload/drive/v3/files/$fileId?uploadType=media',
-          data: Stream.fromIterable([jsonBytes]),
-          options: Options(headers: {
-            'Authorization': 'Bearer $token',
-            'Content-Type': 'application/json',
-            'Content-Length': jsonBytes.length.toString(),
-          }),
-        );
-      } else {
-        // Create new backup file
-        final metadata = jsonEncode({
-          'name': 'tether_preferences.json',
-          'parents': [parentId],
-        });
-
-        const boundary = 'tether_boundary';
-        final header = '\r\n--$boundary\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n$metadata\r\n--$boundary\r\nContent-Type: application/json\r\n\r\n';
-        const footer = '\r\n--$boundary--\r\n';
-
-        final bodyBytes = [
-          ...utf8.encode(header),
-          ...jsonBytes,
-          ...utf8.encode(footer),
-        ];
-
-        await _dio.post(
-          'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
-          data: Stream.fromIterable([bodyBytes]),
-          options: Options(
-            headers: {
-              'Authorization': 'Bearer $token',
-              'Content-Type': 'multipart/related; boundary=$boundary',
-              'Content-Length': bodyBytes.length.toString(),
-            },
-          ),
-        );
-      }
-      LogService.log('Google Drive: User preferences backed up successfully');
-    } catch (e) {
-      LogService.log('Google Drive Error: Preferences backup failed: $e');
-    }
-  }
-
-  Future<Map<String, dynamic>?> restorePreferences() async {
-    try {
-      LogService.log('Google Drive: Restoring user preferences from Tether/tether_preferences.json');
-      final token = await _getAccessToken();
-      final parentId = await _getOrCreateFolder(token, 'Tether');
-
-      final searchResponse = await _dio.get(
-        'https://www.googleapis.com/drive/v3/files',
-        queryParameters: {
-          'q': "name = 'tether_preferences.json' and '$parentId' in parents and trashed = false",
-          'fields': 'files(id)',
-        },
-        options: Options(headers: {'Authorization': 'Bearer $token'}),
-      );
-
-      final files = searchResponse.data['files'] as List?;
-      if (files != null && files.isNotEmpty) {
-        final fileId = files.first['id'] as String;
-        final downloadResponse = await _dio.get(
-          'https://www.googleapis.com/drive/v3/files/$fileId?alt=media',
-          options: Options(
-            headers: {'Authorization': 'Bearer $token'},
-            responseType: ResponseType.json,
-          ),
-        );
-        LogService.log('Google Drive: Preferences restored successfully');
-        return downloadResponse.data as Map<String, dynamic>?;
-      }
-    } catch (e) {
-      LogService.log('Google Drive Error: Preferences restore failed: $e');
-    }
-    return null;
   }
 
   Future<void> backupKeyBackup(Map<String, dynamic> keyData) async {

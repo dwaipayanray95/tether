@@ -22,6 +22,21 @@ This document logs features that were previously designed or partially documente
 - **Removed Screens:** `lib/screens/location_screen.dart` (the entire Google Maps full-screen view showing both partners' pins).
 - **Details:** The app has removed this screen since location streaming and map view features are handled elsewhere or unused, keeping the codebase completely clean from dead references.
 
+### 4. WorkManager-based background backup scheduling
+- **Removed files:** `lib/services/background_backup_task.dart`, `lib/services/background_run_log.dart`. Removed the `workmanager` package dependency entirely.
+- **Why:** Every Drive operation in the backup pipeline needs a Google Sign-In access token via `attemptLightweightAuthentication()`, which requires a foreground Activity context on Android. When actually triggered via a real WorkManager one-off task (verified through a "Trigger Background Task Now" diagnostic button before removal), Firestore reads and crypto succeeded in the background isolate every time, but the *first* Drive call failed every time with `Exception: Google Sign-In user is not available.` — even after calling `GoogleSignIn.instance.initialize()` in the background isolate. This is a hard platform constraint, not a bug that can be patched around.
+- **Replaced by:** `lib/services/foreground_backup_scheduler.dart` (`ForegroundBackupScheduler.runIfDue()`) — checked on app open/resume, runs at most once per 24h, using the same "check on open, run if due" pattern as the update-checker. **Do not reintroduce WorkManager (or any headless-isolate scheduler) for Drive-touching work.**
+
+### 5. Proactive/periodic Google Sign-In scope validation
+- **Removed:** `MainShell._validateGoogleScopes()` and its daily-throttled variant. Previously ran on every cold start (later throttled to once/24h) to detect if `GoogleScopes.all` had grown beyond what the signed-in user had granted, signing them out if so.
+- **Why:** `attemptLightweightAuthentication()` briefly flashes Android's Credential Manager UI (AssistedSignInActivity/CredentialChooserActivity) even for a purely silent/cached lookup. Running this proactively on a schedule — regardless of whether the user was about to use a Drive feature — was a direct, avoidable cause of a visible "quick sign-in" flash on every app open.
+- **Replaced by:** Lazy/reactive checking in `GoogleDriveService._getAccessToken()` — if a Drive call's cached authorization is missing a scope, it signs the user out right there, so the *next* login naturally re-requests the full current scope set. Only fires if a Drive feature is actually used without the needed scope, not on a schedule.
+
+### 6. Ad-hoc, unencrypted preferences backup
+- **Removed:** `GoogleDriveService.backupPreferences()` / `restorePreferences()` (wrote/read a plain, unencrypted `tether_preferences.json` on Drive). Removed `MainShell._backupPrefsToCloud()` (ran on every app background/inactive transition) and `_restorePrefsFromCloud()` (ran on every cold start, later throttled to 24h).
+- **Why:** Preferences backup was a separate, ad-hoc system from the rest of the backup pipeline — different cadence, different Drive file, no encryption, and (before the fix) it was dumping *every* SharedPreferences key including this app's own internal bookkeeping (the backup cursor, the E2EE-verified flag, cached location fixes) — restoring those onto a different device or after a fresh install would have caused real bugs.
+- **Replaced by:** Preferences are now one field (`preferences`) in the same encrypted `BackupSnapshot` that `BackupService` already produces for everything else — see `.context/feature-map.md` → Backup section. Only the explicit allowlist `BackupConfig.backedUpPreferenceKeys` is ever included (currently just `logging_enabled`). **Never add a key to that allowlist that isn't a genuine user-facing setting.**
+
 ---
 
 ## 🔔 Notification System Discrepancies

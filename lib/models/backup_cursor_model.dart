@@ -12,6 +12,7 @@ class BackupCursor {
   final DateTime? profileSyncedAt;
   final DateTime? deletionsSyncedAt;
   final DateTime? lastBackupAt;
+  final int? lastBackupSizeBytes;
 
   const BackupCursor({
     this.messagesSyncedAt,
@@ -21,6 +22,7 @@ class BackupCursor {
     this.profileSyncedAt,
     this.deletionsSyncedAt,
     this.lastBackupAt,
+    this.lastBackupSizeBytes,
   });
 
   factory BackupCursor.fromJson(Map<String, dynamic> json) => BackupCursor(
@@ -31,6 +33,7 @@ class BackupCursor {
         profileSyncedAt: _parse(json['profileSyncedAt']),
         deletionsSyncedAt: _parse(json['deletionsSyncedAt']),
         lastBackupAt: _parse(json['lastBackupAt']),
+        lastBackupSizeBytes: json['lastBackupSizeBytes'] as int?,
       );
 
   static DateTime? _parse(dynamic v) =>
@@ -44,6 +47,7 @@ class BackupCursor {
         'profileSyncedAt': profileSyncedAt?.toIso8601String(),
         'deletionsSyncedAt': deletionsSyncedAt?.toIso8601String(),
         'lastBackupAt': lastBackupAt?.toIso8601String(),
+        'lastBackupSizeBytes': lastBackupSizeBytes,
       };
 
   BackupCursor copyWith({
@@ -54,6 +58,7 @@ class BackupCursor {
     DateTime? profileSyncedAt,
     DateTime? deletionsSyncedAt,
     DateTime? lastBackupAt,
+    int? lastBackupSizeBytes,
   }) =>
       BackupCursor(
         messagesSyncedAt: messagesSyncedAt ?? this.messagesSyncedAt,
@@ -63,5 +68,6 @@ class BackupCursor {
         profileSyncedAt: profileSyncedAt ?? this.profileSyncedAt,
         deletionsSyncedAt: deletionsSyncedAt ?? this.deletionsSyncedAt,
         lastBackupAt: lastBackupAt ?? this.lastBackupAt,
+        lastBackupSizeBytes: lastBackupSizeBytes ?? this.lastBackupSizeBytes,
       );
 }

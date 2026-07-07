@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:cryptography/cryptography.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../config/backup_config.dart';
 import '../models/backup_cursor_model.dart';
 import '../models/backup_snapshot_model.dart';
@@ -74,6 +75,41 @@ class BackupService {
 
   List<Map<String, dynamic>> _sanitizeList(List<Map<String, dynamic>> docs) =>
       docs.map((d) => sanitizeForJson(d) as Map<String, dynamic>).toList();
+
+  Future<Map<String, dynamic>> _currentAllowlistedPreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    final result = <String, dynamic>{};
+    for (final key in BackupConfig.backedUpPreferenceKeys) {
+      if (prefs.containsKey(key)) result[key] = prefs.get(key);
+    }
+    return result;
+  }
+
+  /// Applies backed-up preference values to local SharedPreferences. Only
+  /// ever writes keys from [BackupConfig.backedUpPreferenceKeys] — the
+  /// backup itself only ever contains that allowlist, but this stays
+  /// explicit as a second guard against ever writing back internal
+  /// bookkeeping keys.
+  Future<void> _applyPreferencesLocally(Map<String, dynamic> preferences) async {
+    if (preferences.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    for (final key in BackupConfig.backedUpPreferenceKeys) {
+      final value = preferences[key];
+      if (value == null) continue;
+      if (value is bool) {
+        await prefs.setBool(key, value);
+      } else if (value is int) {
+        await prefs.setInt(key, value);
+      } else if (value is double) {
+        await prefs.setDouble(key, value);
+      } else if (value is String) {
+        await prefs.setString(key, value);
+      } else if (value is List) {
+        await prefs.setStringList(key, value.cast<String>());
+      }
+    }
+    LogService.log('Backup: restored ${preferences.length} preference(s) locally');
+  }
 
   /// Runs one incremental backup cycle. Safe to retry — nothing is
   /// advanced/promoted unless the run fully succeeds.
@@ -150,11 +186,13 @@ class BackupService {
         coupleDoc: coupleDocRaw != null
             ? sanitizeForJson(coupleDocRaw) as Map<String, dynamic>
             : existing.coupleDoc,
+        preferences: await _currentAllowlistedPreferences(),
       );
 
       // 4. Encrypt and upload as the pending file — the last known-good
       // backup is untouched until this is verified.
-      await _encryptAndUpload(merged, sharedKey, BackupConfig.pendingBackupFileName);
+      final backupSizeBytes =
+          await _encryptAndUpload(merged, sharedKey, BackupConfig.pendingBackupFileName);
 
       // 5. Integrity check: the backup must never contain fewer live
       // records than Firestore currently has (it's fine for it to have
@@ -192,6 +230,7 @@ class BackupService {
         deletionsSyncedAt:
             deletions.isNotEmpty ? deletions.last.deletedAt : cursor.deletionsSyncedAt,
         lastBackupAt: DateTime.now(),
+        lastBackupSizeBytes: backupSizeBytes,
       );
       await _cursorStore.save(newCursor);
 
@@ -270,6 +309,7 @@ class BackupService {
           deletionsSyncedAt: now,
           lastBackupAt: now,
         ));
+        await _applyPreferencesLocally(backup.preferences);
       }
 
       LogService.log(
@@ -292,13 +332,16 @@ class BackupService {
     return BackupSnapshot.fromJson(json);
   }
 
-  Future<void> _encryptAndUpload(
+  /// Returns the uploaded byte size, so callers can record it for display
+  /// (e.g. "Backup: 128 KB, just now" in the user-facing Backup screen).
+  Future<int> _encryptAndUpload(
       BackupSnapshot snapshot, SecretKey sharedKey, String fileName) async {
     final plainBytes = utf8.encode(jsonEncode(snapshot.toJson()));
     final envelope =
         await CryptoService().encryptBytes(Uint8List.fromList(plainBytes), sharedKey);
     final encryptedBytes = utf8.encode(jsonEncode(envelope));
     await _drive.uploadOrReplaceBytes(fileName, Uint8List.fromList(encryptedBytes));
+    return encryptedBytes.length;
   }
 
   Future<bool> _verifyIntegrity(BackupSnapshot merged) async {

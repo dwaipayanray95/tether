@@ -23,6 +23,14 @@ These are the core hardcoded constants, credentials, helper guidelines, styling 
 - `AuthService().partnerName` - returns opposite of myName.
 - **Lowercase keys:** Use lowercase `'ray'` / `'aproo'` when targeting presence documents, FCM tokens.
 
+## Backup System
+
+- **Config:** `lib/config/backup_config.dart` (`BackupConfig`).
+- **Drive folder:** `Tether/` — files: `latest_backup.json.enc` (current), `backup_gen1/2/3.json.enc` (rotated prior generations, oldest deleted once a 4th would be created — `maxBackupGenerations = 3`).
+- **`tether_key_backup.json`** is separate — the E2EE private key backup (PIN-encrypted), unrelated to the general backup pipeline.
+- **Cadence:** at most once per 24h, checked on app open/resume via `ForegroundBackupScheduler.runIfDue()` — never on a background scheduler (see hard-rules.md).
+- **Preferences allowlist:** `BackupConfig.backedUpPreferenceKeys` — only these SharedPreferences keys are ever included in a backup. Currently: `logging_enabled`. Never add an internal bookkeeping key (backup cursor, E2EE-verified flag, cached location) to this list.
+
 ## Notification Channels
 
 - `tether_updates_v1` - Default notification channel for messages, pokes, and todo updates.

@@ -6,6 +6,7 @@ import '../models/backup_cursor_model.dart';
 import '../services/auth_service.dart';
 import '../services/backup_cursor_store.dart';
 import '../theme/app_theme.dart';
+import 'backup_screen.dart';
 import 'diagnostics_screen.dart';
 import 'partner_info_screen.dart';
 
@@ -56,13 +57,13 @@ class SettingsScreen extends StatelessWidget {
               final lastBackupAt = snap.data?.lastBackupAt;
               return _buildTile(
                 icon: Icons.cloud_done_rounded,
-                title: 'Last Backup',
+                title: 'Backup',
                 subtitle: lastBackupAt != null
                     ? 'Backed up ${timeago.format(lastBackupAt)} to Google Drive'
                     : 'Never backed up yet',
                 onTap: () => Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (_) => const DiagnosticsScreen()),
+                  MaterialPageRoute(builder: (_) => const BackupScreen()),
                 ),
               );
             },

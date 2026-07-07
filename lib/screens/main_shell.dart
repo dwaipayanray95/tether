@@ -18,7 +18,6 @@ import '../services/google_drive_service.dart';
 import '../services/crypto_service.dart';
 import '../services/foreground_backup_scheduler.dart';
 import '../config/env_config.dart';
-import '../config/google_scopes.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class MainShell extends StatefulWidget {
@@ -57,68 +56,17 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     _updateBatteryStatus();
     _batteryTimer = Timer.periodic(const Duration(minutes: 5), (_) => _updateBatteryStatus());
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      // Validate Google API scopes, auto log out if new scopes are missing
-      await _validateGoogleScopes();
       // Handle notification-triggered navigation on cold start
       _handlePendingNotification();
       // Check for update on launch
       _checkForUpdate();
       // Proactively check and request all permissions
       _requestAllPermissions();
-      // Restore user preferences backup from Google Drive
-      await _restorePrefsFromCloud();
       // Ensure E2EE is set up and key is backed up
       await _checkE2EESetup();
       // Run the full-state backup if it's been due 24h+ since the last one
       await ForegroundBackupScheduler.runIfDue();
     });
-  }
-
-  Future<void> _validateGoogleScopes() async {
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return;
-
-      final isGoogleUser = user.providerData.any((p) => p.providerId == 'google.com');
-      if (!isGoogleUser) return;
-
-      final googleUser = await _auth.getGoogleUser();
-
-      if (googleUser == null) {
-        LogService.log('Google Sign-In user not available on startup scope check. Skipping check until next operation.');
-        return;
-      }
-
-      try {
-        // Self-healing scope check: only ever a silent lookup. Android
-        // requires authorizeScopes() (the interactive grant) to be
-        // triggered by a real user tap, so we must never call it here in
-        // the background — that was what caused the Google consent screen
-        // to pop up repeatedly. Instead, if GoogleScopes.all has grown to
-        // include scopes this signed-in user never granted, sign them out
-        // so the normal login flow (AuthService.signInWithGoogle) requests
-        // the full current scope set from a real button press.
-        LogService.log('Google Sign-In: Checking cached scopes via authorizationForScopes');
-        final auth = await googleUser.authorizationClient.authorizationForScopes(GoogleScopes.all);
-        if (auth == null) {
-          LogService.log('Google Sign-In: Missing cached scopes in authorizationForScopes. Logging out to force re-consent.');
-          await _auth.signOut();
-        } else {
-          LogService.log('Google Sign-In: Cached scopes verified successfully');
-        }
-      } catch (e) {
-        final errStr = e.toString().toLowerCase();
-        if (errStr.contains('unimplemented') || errStr.contains('not implemented') || errStr.contains('notsupported')) {
-          LogService.log('Google Sign-In: scopes check is unimplemented on this platform. Skipping check.');
-        } else {
-          LogService.log('Google Sign-In scope verification failed: $e. Logging out to be safe.');
-          await _auth.signOut();
-        }
-      }
-    } catch (e) {
-      LogService.log('Outer Google Sign-In scope verification failed: $e. Logging out to be safe.');
-      await _auth.signOut();
-    }
   }
 
   Future<void> _updateBatteryStatus() async {
@@ -138,46 +86,6 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       }
     } catch (e) {
       LogService.log('Error getting battery level: $e');
-    }
-  }
-
-  Future<void> _backupPrefsToCloud() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final keys = prefs.getKeys();
-      final Map<String, dynamic> prefsMap = {};
-      for (final key in keys) {
-        prefsMap[key] = prefs.get(key);
-      }
-      await GoogleDriveService().backupPreferences(prefsMap);
-    } catch (e) {
-      LogService.log('Failed to backup preferences: $e');
-    }
-  }
-
-  Future<void> _restorePrefsFromCloud() async {
-    try {
-      final cloudPrefs = await GoogleDriveService().restorePreferences();
-      if (cloudPrefs != null) {
-        final prefs = await SharedPreferences.getInstance();
-        for (final entry in cloudPrefs.entries) {
-          final val = entry.value;
-          if (val is bool) {
-            await prefs.setBool(entry.key, val);
-          } else if (val is int) {
-            await prefs.setInt(entry.key, val);
-          } else if (val is double) {
-            await prefs.setDouble(entry.key, val);
-          } else if (val is String) {
-            await prefs.setString(entry.key, val);
-          } else if (val is List) {
-            await prefs.setStringList(entry.key, val.cast<String>());
-          }
-        }
-        LogService.log('Preferences synced from Google Drive.');
-      }
-    } catch (e) {
-      LogService.log('Failed to restore preferences: $e');
     }
   }
 
@@ -374,13 +282,15 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         _firestore.updatePresence(_myPresenceKey);
         _updateBatteryStatus();
         _checkForUpdate();
+        // Preferences are now part of the unified backup pipeline (see
+        // BackupService/ForegroundBackupScheduler) rather than backed up
+        // separately on every background/inactive transition.
         ForegroundBackupScheduler.runIfDue();
         WidgetsBinding.instance.addPostFrameCallback((_) {
           _handlePendingNotification();
         });
         break;
       default:
-        _backupPrefsToCloud();
         break;
     }
   }
@@ -464,7 +374,27 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     );
   }
 
+  static const _e2eeVerifiedKey = 'e2ee_backup_verified';
+
   Future<void> _checkE2EESetup() async {
+    if (!mounted) return;
+
+    final myPubKey = await CryptoService().getPublicKey();
+    final prefs = await SharedPreferences.getInstance();
+
+    // Fast path: local keys already exist and we've previously confirmed
+    // a Drive backup exists too. Re-checking on every single app open was
+    // the direct cause of a blocking "Checking encryption status" dialog
+    // (and the Drive network round trip behind it) on every launch, even
+    // though this only ever needs verifying once — it doesn't change
+    // between opens unless keys are cleared/restored.
+    if (myPubKey != null && (prefs.getBool(_e2eeVerifiedKey) ?? false)) {
+      // Still sync the public key to Firestore in the background in case
+      // it's ever missing there, but without blocking the UI on it.
+      _firestore.registerPublicKey(_myPresenceKey, myPubKey);
+      return;
+    }
+
     if (!mounted) return;
 
     // Show a loading dialog while checking Google Drive backup
@@ -488,19 +418,20 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       ),
     );
 
-    final myPubKey = await CryptoService().getPublicKey();
     final backup = await GoogleDriveService().restoreKeyBackup();
-    
+
     if (!mounted) return;
     Navigator.pop(context); // Dismiss loading dialog
 
     if (myPubKey != null) {
       // Sync public key just in case it is missing on Firestore
       await _firestore.registerPublicKey(_myPresenceKey, myPubKey);
-      
+
       // If we have local keys but NO backup on Google Drive, we must prompt to upload backup!
       if (backup == null) {
         _showBackupRequiredDialog();
+      } else {
+        await prefs.setBool(_e2eeVerifiedKey, true);
       }
       return;
     }
@@ -556,6 +487,8 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                     final encryptedBackup = await CryptoService().encryptPrivateKey(pin, privateKey);
                     encryptedBackup['publicKey'] = publicKey;
                     await GoogleDriveService().backupKeyBackup(encryptedBackup);
+                    final prefs = await SharedPreferences.getInstance();
+                    await prefs.setBool(_e2eeVerifiedKey, true);
                   }
                   if (ctx.mounted) Navigator.pop(ctx);
                 } catch (e) {
@@ -615,6 +548,8 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                   await CryptoService().restoreKeys(publicKey, decryptedPrivateKey);
                   // Register public key to Firestore
                   await _firestore.registerPublicKey(_myPresenceKey, publicKey);
+                  final prefs = await SharedPreferences.getInstance();
+                  await prefs.setBool(_e2eeVerifiedKey, true);
 
                   if (ctx.mounted) Navigator.pop(ctx);
                 } catch (e) {
@@ -680,6 +615,8 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
 
                   // Register public key to Firestore
                   await _firestore.registerPublicKey(_myPresenceKey, publicKey);
+                  final prefs = await SharedPreferences.getInstance();
+                  await prefs.setBool(_e2eeVerifiedKey, true);
 
                   if (ctx.mounted) Navigator.pop(ctx);
                 } catch (e) {

@@ -23,6 +23,13 @@ class CryptoService {
 
   // Cached in-memory shared secret key to avoid computing it on every message
   SecretKey? _cachedSharedKey;
+  // Guards against concurrent callers each independently re-deriving the key
+  // before the first one finishes — cold start fires many independent
+  // flows (prefs restore, E2EE check, decrypting visible chat/comments,
+  // backup-if-due) nearly simultaneously, and without this every one of
+  // them would see the cache as empty and redo the expensive ECDH+SHA-256
+  // derivation itself.
+  Future<SecretKey>? _sharedKeyFuture;
 
   /// Generate X25519 keypair, save private key in Secure Storage, and return public key.
   Future<String> initializeKeys() async {
@@ -58,6 +65,7 @@ class CryptoService {
     await _secureStorage.write(key: _publicKeyStorageKey, value: publicKeyBase64);
     await _secureStorage.write(key: _privateKeyStorageKey, value: privateKeyBase64);
     _cachedSharedKey = null; // Reset cache
+    _sharedKeyFuture = null;
     LogService.log('Crypto: Restored keys into Secure Storage');
   }
 
@@ -74,13 +82,20 @@ class CryptoService {
     await _secureStorage.delete(key: _publicKeyStorageKey);
     await _secureStorage.delete(key: _privateKeyStorageKey);
     _cachedSharedKey = null;
+    _sharedKeyFuture = null;
     LogService.log('Crypto: Cleared keys from Secure Storage');
   }
 
   /// Derive shared secret using My Private Key and Partner's Public Key.
-  Future<SecretKey> getSharedKey(String partnerPublicKeyBase64) async {
-    if (_cachedSharedKey != null) return _cachedSharedKey!;
+  Future<SecretKey> getSharedKey(String partnerPublicKeyBase64) {
+    if (_cachedSharedKey != null) return Future.value(_cachedSharedKey!);
+    return _sharedKeyFuture ??= _deriveSharedKey(partnerPublicKeyBase64).then((key) {
+      _sharedKeyFuture = null;
+      return key;
+    });
+  }
 
+  Future<SecretKey> _deriveSharedKey(String partnerPublicKeyBase64) async {
     try {
       final myPrivKeyBase64 = await _secureStorage.read(key: _privateKeyStorageKey);
       if (myPrivKeyBase64 == null) {
