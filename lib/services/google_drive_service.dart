@@ -9,6 +9,44 @@ class GoogleDriveService {
   final Dio _dio = Dio();
   final AuthService _auth = AuthService();
 
+  GoogleDriveService() {
+    // The 50-minute TTL is a conservative guess, not an authoritative expiry
+    // (the plugin doesn't expose one). If Google invalidates a token early
+    // (e.g. revoked externally) a call can still 401 before the TTL is up.
+    // Evict the cache on any 401 so the *next* call fetches a fresh token
+    // instead of repeating the same stale one for up to 50 more minutes.
+    // This doesn't retry the failing call itself — callers still see the
+    // exception — but it self-heals immediately rather than on a timer.
+    _dio.interceptors.add(InterceptorsWrapper(onError: (error, handler) {
+      final status = error.response?.statusCode;
+      if (status == 401) {
+        LogService.log('Google Drive: Got 401, evicting cached access token');
+        invalidateCachedAccessToken();
+      }
+      // DioException's default toString() ("bad syntax or cannot be
+      // fulfilled") is just the generic HTTP 403 spec text, not Google's
+      // actual reason — the real cause (insufficientPermissions,
+      // storageQuotaExceeded, notFound, etc.) is in the JSON response body.
+      // Log it so the next failure is diagnosable instead of generic.
+      if (status != null && status >= 400) {
+        LogService.log('Google Drive: HTTP $status response body: ${error.response?.data}');
+      }
+      handler.next(error);
+    }));
+  }
+
+  // Static, not instance-level: GoogleDriveService() is constructed fresh at
+  // nearly every call site, so an instance field would never actually cache
+  // anything (same lesson as AuthService._cachedGoogleUser).
+  //
+  // Google's own access tokens for these scopes last ~1h, but the plugin's
+  // GoogleSignInClientAuthorization doesn't surface an expiry — 50 minutes
+  // is a conservative TTL safely under that.
+  static String? _cachedAccessToken;
+  static DateTime? _cachedTokenObtainedAt;
+  static Future<String>? _tokenFuture;
+  static const _tokenTtl = Duration(minutes: 50);
+
   // Only ever checks the cached authorization silently. Android requires
   // authorizeScopes() (the interactive grant) to be triggered by a real user
   // tap, so it must never be called from this background path — doing so
@@ -22,6 +60,23 @@ class GoogleDriveService {
   // full current scope set. That's lazy/reactive rather than checked on
   // every app open, matching how most Google Sign-In apps behave.
   Future<String> _getAccessToken() async {
+    final cached = _cachedAccessToken;
+    final obtainedAt = _cachedTokenObtainedAt;
+    if (cached != null && obtainedAt != null && DateTime.now().difference(obtainedAt) < _tokenTtl) {
+      return cached;
+    }
+    return _tokenFuture ??= _fetchAccessToken().whenComplete(() => _tokenFuture = null);
+  }
+
+  // authorizationForScopes() is a separate Play Services round trip from
+  // AuthService.getGoogleUser()'s cached lightweight-auth check — calling it
+  // fresh on every single Drive operation (uploads, downloads, folder
+  // lookups, ...) was still triggering a brief system UI transition per
+  // call, even though the account itself was already cached. Caching the
+  // resulting token here (not just the account) collapses that down to at
+  // most once per _tokenTtl, regardless of how many Drive operations happen
+  // in between.
+  Future<String> _fetchAccessToken() async {
     LogService.log('Google Drive: Obtaining access token');
     final googleUser = await _auth.getGoogleUser();
     if (googleUser == null) {
@@ -37,8 +92,17 @@ class GoogleDriveService {
       throw Exception('Google Drive access not authorized. Please sign in again.');
     }
 
+    _cachedAccessToken = token;
+    _cachedTokenObtainedAt = DateTime.now();
     LogService.log('Google Drive: Successfully retrieved cached access token silently');
     return token;
+  }
+
+  /// Call after signing out, or after any Drive call fails with a 401, so
+  /// the next request re-fetches rather than retrying a stale/invalid token.
+  static void invalidateCachedAccessToken() {
+    _cachedAccessToken = null;
+    _cachedTokenObtainedAt = null;
   }
 
   // ── Drive Folder Management ────────────────────────────────────────────────
