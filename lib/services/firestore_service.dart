@@ -119,7 +119,7 @@ class FirestoreService {
     
     final email = FirebaseAuth.instance.currentUser?.email;
     if (email != null) {
-      final key = email == 'ray@redacted.invalid' ? 'ray' : 'aproo';
+      final key = email == allowedEmails[0] ? 'ray' : 'aproo';
       await updatePresence(key);
     }
   }

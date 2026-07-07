@@ -76,10 +76,11 @@
             </intent-filter>
         </activity>
 
-        <!-- Google Maps API key -->
+        <!-- Google Maps API key — injected at build time via Gradle manifestPlaceholders,
+             see android/app/build.gradle.kts and .github/workflows/build-apk.yml -->
         <meta-data
             android:name="com.google.android.geo.API_KEY"
-            android:value="REDACTED_MAPS_API_KEY"/>
+            android:value="${mapsApiKey}"/>
 
         <!-- FCM default notification channel -->
         <meta-data

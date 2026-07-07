@@ -6,7 +6,7 @@ These are the core hardcoded constants, credentials, helper guidelines, styling 
 
 - **Configuration File:** All secret parameters are stored inside `lib/config/env_config.dart` (which is gitignored and populated on GitHub Actions runners using `ENV_CONFIG_DART`).
 - **Couple Identifier:** `EnvConfig.coupleId` (`'ray-aproo'`) — shared ID for Firestore collections.
-- **Authorized Emails:** `EnvConfig.allowedEmails` (`['ray@redacted.invalid', 'aproo@redacted.invalid']`).
+- **Authorized Emails:** `EnvConfig.allowedEmails` — two real personal Gmail addresses, never written literally outside this gitignored file (see hard-rules.md).
 
 ## End-to-End Encryption (E2EE)
 

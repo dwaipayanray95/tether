@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:dio/dio.dart';
 import 'package:dart_jsonwebtoken/dart_jsonwebtoken.dart';
 import '../config/notification_config.dart';
+import 'auth_service.dart';
 import 'log_service.dart';
 
 class FcmService {
@@ -71,9 +72,8 @@ class FcmService {
     
     try {
       if (nameKey == 'self') {
-        const rayEmail = 'ray@redacted.invalid';
         final email = FirebaseAuth.instance.currentUser?.email ?? '';
-        final myNameKey = email == rayEmail ? 'ray' : 'aproo';
+        final myNameKey = email == allowedEmails[0] ? 'ray' : 'aproo';
         
         final myDoc = await FirebaseFirestore.instance
             .collection('couples')

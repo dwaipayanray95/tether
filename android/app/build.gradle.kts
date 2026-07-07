@@ -52,6 +52,10 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        // Injected via the MAPS_API_KEY env var (see .github/workflows/build-apk.yml).
+        // Empty string keeps local `flutter build`/`flutter run` working without the
+        // key set — map tiles just won't load locally, which is fine for day-to-day dev.
+        manifestPlaceholders["mapsApiKey"] = System.getenv("MAPS_API_KEY") ?: ""
     }
 
     buildTypes {

@@ -7,7 +7,8 @@ These are the critical rules that must always be followed without exception when
 | **Never push to GitHub** | Do not run `git push`, `git tag`, or `gh release create` unless the user explicitly asks in that message |
 | **Never bump `pubspec.yaml`** | The user will manually bump version codes henceforth. Do not auto-increment version code. |
 | **Never change `coupleId`** | It is always `'ray-aproo'` — loaded from the gitignored `lib/config/env_config.dart` file. |
-| **Never change allowed emails** | `ray@redacted.invalid` = Ray, `aproo@redacted.invalid` = Aproo — loaded from `lib/config/env_config.dart`. |
+| **Never change allowed emails** | Two real personal Gmail addresses — loaded from the gitignored `lib/config/env_config.dart` (`EnvConfig.allowedEmails[0]` = Ray, `[1]` = Aproo). Never write the literal addresses anywhere else. |
+| **Never hardcode API keys, secrets, or personal emails in source** | This repo is public. Any real key/credential/email committed to a tracked file is permanently visible in git history even after later removal. All secrets are injected at CI build time via GitHub Actions secrets — see `.github/workflows/build-apk.yml`. |
 | **Name comparison is case-sensitive** | `fromName == 'Ray'` (capital R). Partner key strings are lowercase `'ray'` / `'aproo'` |
 | **Always run `flutter analyze` before committing** | Fix all errors and warnings first |
 | **All backup logic goes through `BackupService`** | Never add a new ad-hoc `GoogleDriveService` call for backing up/restoring app data. Messages, todos, comments, sticky notes, profiles, the couple doc, and the allowlisted app preferences are all backed up together as one encrypted `BackupSnapshot` via `backup_service.dart`. See `.context/database-schemas.md` for the `deletions` tombstone collection and cursor model this depends on. |

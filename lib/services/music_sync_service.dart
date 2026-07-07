@@ -1,5 +1,6 @@
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'auth_service.dart';
 import 'firestore_service.dart';
 import 'log_service.dart';
 
@@ -34,7 +35,7 @@ class MusicSyncService {
 
         // Check allowedEmails mapping dynamically
         final email = FirebaseAuth.instance.currentUser?.email;
-        final key = email == 'ray@redacted.invalid' ? 'ray' : 'aproo';
+        final key = email == allowedEmails[0] ? 'ray' : 'aproo';
 
         LogService.log('[MusicSync] Received Native Broadcast: "$track" by $artist (Playing: $isPlaying)');
 
@@ -56,7 +57,7 @@ class MusicSyncService {
   static Future<void> updateMusicManually(String track, String artist) async {
     final email = FirebaseAuth.instance.currentUser?.email;
     if (email == null) return;
-    final key = email == 'ray@redacted.invalid' ? 'ray' : 'aproo';
+    final key = email == allowedEmails[0] ? 'ray' : 'aproo';
 
     LogService.log('[MusicSync] Setting manual track: "$track" by $artist');
     
@@ -76,7 +77,7 @@ class MusicSyncService {
   static Future<void> clearMusic() async {
     final email = FirebaseAuth.instance.currentUser?.email;
     if (email == null) return;
-    final key = email == 'ray@redacted.invalid' ? 'ray' : 'aproo';
+    final key = email == allowedEmails[0] ? 'ray' : 'aproo';
 
     LogService.log('[MusicSync] Clearing active music track');
     _lastTrack = null;

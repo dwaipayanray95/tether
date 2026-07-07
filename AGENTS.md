@@ -13,7 +13,8 @@ Package: `com.theawesomeray.tether`
 | **Never push to GitHub** | Do not run `git push`, `git tag`, or `gh release create` unless the user explicitly asks in that message |
 | **Never bump version numbers** | Do not change `pubspec.yaml` version. The user will manage versioning manually |
 | **Never change `coupleId`** | It is always `'ray-aproo'` — hardcoded across Firestore paths |
-| **Never change allowed emails** | `ray@redacted.invalid` = Ray, `aproo@redacted.invalid` = Aproo |
+| **Never change allowed emails** | Two real personal Gmail addresses, defined in the gitignored `lib/config/env_config.dart` (`EnvConfig.allowedEmails[0]` = Ray, `[1]` = Aproo). Never write the literal addresses anywhere else — see the secrets rule below |
+| **Never hardcode API keys, secrets, or personal emails in source** | This repo is public. Any real key, credential, or personal email committed to a tracked file (code, manifests, docs, CI logs) is permanently visible in git history even after being "removed" later — history rewrites are destructive and not a substitute for not committing it in the first place. All secrets (Firebase service account, allowed emails, Maps API key, keystore) must be injected at CI build time via GitHub Actions secrets into gitignored files (`env_config.dart`, `notification_config.dart`) or Gradle manifest placeholders — see `.github/workflows/build-apk.yml`'s "Restore Keystore & Configuration Secrets" step for the existing pattern to extend, not replace |
 | **Name comparison is case-sensitive** | `myName == 'Ray'` (capital R). Partner key strings are lowercase `'ray'` / `'aproo'` |
 | **Always run `flutter analyze` before committing** | Fix all errors and warnings first |
 | **Calls are removed** | There is no call system. Do not reference `call_service.dart`, `audio_relay_service.dart`, `proximity_service.dart`, or `opus_dart` — these files do not exist |
@@ -371,7 +372,7 @@ Sensitive variables like permitted emails, couple ID, and maps API Key are loade
 ```dart
 // lib/config/env_config.dart (Template / Default Values)
 class EnvConfig {
-  static const allowedEmails = ['ray@redacted.invalid', 'aproo@redacted.invalid'];
+  static const allowedEmails = ['your-email@example.com', 'partner-email@example.com'];
   static const coupleId = 'ray-aproo';
 }
 ```

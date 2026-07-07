@@ -232,9 +232,8 @@ class NotificationService {
         .doc(uid)
         .set({'fcmToken': token}, SetOptions(merge: true));
 
-    const rayEmail = 'ray@redacted.invalid';
     final email = FirebaseAuth.instance.currentUser?.email ?? '';
-    final myName = email == rayEmail ? 'ray' : 'aproo';
+    final myName = email == allowedEmails[0] ? 'ray' : 'aproo';
     await FirebaseFirestore.instance
         .collection('couples')
         .doc('ray-aproo')
