@@ -10,6 +10,10 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import androidx.core.app.Person
+import androidx.core.content.pm.ShortcutInfoCompat
+import androidx.core.content.pm.ShortcutManagerCompat
+import androidx.core.graphics.drawable.IconCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -88,6 +92,22 @@ class MainActivity : FlutterActivity() {
                     "isCharging" to isCharging
                 )
                 result.success(data)
+            } else {
+                result.notImplemented()
+            }
+        }
+
+        val shortcutsChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.theawesomeray.tether/shortcuts")
+        shortcutsChannel.setMethodCallHandler { call, result ->
+            if (call.method == "pushConversationShortcut") {
+                val shortcutId = call.argument<String>("shortcutId")
+                val label = call.argument<String>("label")
+                if (shortcutId != null && label != null) {
+                    pushConversationShortcut(shortcutId, label)
+                    result.success(true)
+                } else {
+                    result.error("bad_args", "shortcutId and label are required", null)
+                }
             } else {
                 result.notImplemented()
             }
@@ -205,6 +225,41 @@ class MainActivity : FlutterActivity() {
             registerReceiver(musicReceiver, filter, Context.RECEIVER_EXPORTED)
         } else {
             registerReceiver(musicReceiver, filter)
+        }
+    }
+
+    // Publishes a long-lived dynamic shortcut tied to a Person. This is what
+    // makes a MessagingStyle notification with a matching shortcutId land in
+    // Android's "Conversations" section (pinned above regular notifications,
+    // like WhatsApp/Instagram DMs) instead of behaving as a plain high-priority
+    // alert. Setting importance/priority to max alone does not do this — the
+    // shortcut is the actual signal Android checks for conversation grouping.
+    private fun pushConversationShortcut(shortcutId: String, label: String) {
+        val icon = IconCompat.createWithResource(this, R.mipmap.ic_launcher)
+
+        val person = Person.Builder()
+            .setName(label)
+            .setIcon(icon)
+            .setImportant(true)
+            .build()
+
+        val intent = Intent(this, MainActivity::class.java).apply {
+            action = Intent.ACTION_VIEW
+        }
+
+        val shortcut = ShortcutInfoCompat.Builder(this, shortcutId)
+            .setLongLived(true)
+            .setShortLabel(label)
+            .setIcon(icon)
+            .setPerson(person)
+            .setIntent(intent)
+            .build()
+
+        try {
+            ShortcutManagerCompat.pushDynamicShortcut(this, shortcut)
+        } catch (e: Exception) {
+            // Non-fatal — worst case the notification falls back to a normal
+            // high-priority alert instead of a grouped conversation.
         }
     }
 

@@ -68,6 +68,10 @@ android {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    // ShortcutManagerCompat + Person — used by MainActivity to publish the
+    // long-lived conversation shortcut that makes chat notifications land in
+    // Android's "Conversations" section (see NotificationService in Dart).
+    implementation("androidx.core:core:1.13.1")
 }
 
 flutter {

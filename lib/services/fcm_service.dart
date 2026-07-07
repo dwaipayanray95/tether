@@ -126,7 +126,20 @@ class FcmService {
         return (success: false, message: errMsg);
       }
 
-      final isDataOnly = type == 'call_ping' || type == 'call_ended' || type == 'ping';
+      // Data-only for every type we render ourselves via flutter_local_notifications
+      // (see NotificationService). This is required for chat/poke/snap/todo too —
+      // if FCM's own 'notification' block were included, Android auto-displays a
+      // plain system notification in background/killed state that bypasses our
+      // MessagingStyle/shortcutId/category entirely, so it never lands in the
+      // Conversations section like WhatsApp/Instagram. Data-only forces every
+      // state (foreground, background, killed) through our own rendering path.
+      final isDataOnly = type == 'call_ping' ||
+          type == 'call_ended' ||
+          type == 'ping' ||
+          type == 'chat' ||
+          type == 'poke' ||
+          type == 'snap' ||
+          type == 'todo';
 
       // Construct request body for HTTP v1 FCM API
       final Map<String, dynamic> requestBody = {

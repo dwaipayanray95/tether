@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/services.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -29,6 +30,25 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     // Calling is removed
     return;
   }
+
+  if (type == 'chat' || type == 'poke' || type == 'snap' || type == 'todo') {
+    // These types are sent data-only (see fcm_service.dart) specifically so
+    // this handler renders them itself via NotificationService._showLocal,
+    // instead of letting the OS auto-display a plain notification that
+    // bypasses MessagingStyle/shortcutId/category. Must initialize the
+    // plugin fresh — this runs in its own isolate, separate from the app's.
+    await NotificationService._local.initialize(
+      settings: const InitializationSettings(
+        android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+      ),
+    );
+    await NotificationService._showLocal(
+      title: message.data['title'] as String? ?? '',
+      body: message.data['body'] as String? ?? '',
+      payload: jsonEncode(message.data),
+      type: type,
+    );
+  }
 }
 
 // ── NotificationService ───────────────────────────────────────────────────────
@@ -37,6 +57,8 @@ class NotificationService {
   static final FirebaseMessaging _messaging = FirebaseMessaging.instance;
   static final FlutterLocalNotificationsPlugin _local =
       FlutterLocalNotificationsPlugin();
+  static const _shortcutsChannel =
+      MethodChannel('com.theawesomeray.tether/shortcuts');
 
   // Default channel — messages, pokes, to-dos
   static const _defaultChannel = AndroidNotificationChannel(
@@ -67,6 +89,8 @@ class NotificationService {
     final androidPlugin = _local.resolvePlatformSpecificImplementation<
         AndroidFlutterLocalNotificationsPlugin>();
     await androidPlugin?.createNotificationChannel(_defaultChannel);
+
+    await _pushConversationShortcut();
 
     await _local.initialize(
       settings: const InitializationSettings(
@@ -113,11 +137,16 @@ class NotificationService {
       // Suppress chat banner if user is already in chat
       if (type == 'chat' && chatIsOpen) return;
 
-      final n = message.notification;
-      if (n == null) return;
+      // chat/poke/snap/todo arrive data-only (see fcm_service.dart), so
+      // title/body live in `data`, not `message.notification` (which will be
+      // null for those types). Other/legacy types may still carry a
+      // notification block, so fall back to that if data doesn't have it.
+      final title = message.data['title'] as String? ?? message.notification?.title;
+      final body = message.data['body'] as String? ?? message.notification?.body;
+      if (title == null || body == null) return;
       _showLocal(
-        title: n.title ?? '',
-        body: n.body ?? '',
+        title: title,
+        body: body,
         payload: jsonEncode(message.data),
         type: type,
       );
@@ -163,12 +192,21 @@ class NotificationService {
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
-  static Future<void> showTest() async {
-    await _showLocal(
-      title: '🔔 Test Notification',
-      body: 'If you hear this, sound and vibration are working!',
-      payload: jsonEncode({'type': 'test'}),
-    );
+  // Registers the partner as a long-lived Android shortcut so chat/poke
+  // notifications (built with a matching shortcutId in _showLocal) are
+  // recognized as a "Conversation" and get grouped/pinned above regular
+  // notifications, the same way WhatsApp/Instagram DMs behave. Safe to call
+  // repeatedly — Android just updates the existing shortcut.
+  static Future<void> _pushConversationShortcut() async {
+    try {
+      final auth = AuthService();
+      await _shortcutsChannel.invokeMethod('pushConversationShortcut', {
+        'shortcutId': 'tether_conversation_${auth.partnerName.toLowerCase()}',
+        'label': auth.partnerDisplayName,
+      });
+    } catch (e) {
+      LogService.log('Error pushing conversation shortcut: $e');
+    }
   }
 
   static Future<void> _showLocal({
@@ -179,8 +217,13 @@ class NotificationService {
   }) async {
     StyleInformation? styleInformation;
     String? shortcutId;
+    AndroidNotificationCategory? category;
 
-    if (type == 'chat' || type == 'poke') {
+    // Every notification type here originates from the partner's actions
+    // (message, poke, snap, todo update) — in a 2-person app there's only
+    // ever one "conversation", so all of them ride the same shortcut/Person
+    // to get Android's Conversations-section treatment, not just chat/poke.
+    if (type == 'chat' || type == 'poke' || type == 'snap' || type == 'todo') {
       final auth = AuthService();
       final partnerName = auth.partnerDisplayName;
       final partner = Person(
@@ -199,6 +242,7 @@ class NotificationService {
         ],
       );
       shortcutId = 'tether_conversation_${auth.partnerName.toLowerCase()}';
+      category = AndroidNotificationCategory.message;
     }
 
     await _local.show(
@@ -217,6 +261,7 @@ class NotificationService {
           icon: '@mipmap/ic_launcher',
           styleInformation: styleInformation,
           shortcutId: shortcutId,
+          category: category,
         ),
       ),
       payload: payload,
