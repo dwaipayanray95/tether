@@ -760,6 +760,13 @@ class ChatScreenState extends State<ChatScreen> {
       itemPositionsListener: _itemPositionsListener,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       itemCount: itemCount,
+      // Defaults to 0, meaning items are built/disposed almost exactly at
+      // the viewport edge — every bubble owns a _SwipeableMessage with its
+      // own AnimationController/Ticker (see below), so a fast fling was
+      // constantly destroying and recreating those on every item crossing
+      // the edge. A cache buffer keeps a screen's worth built on each side,
+      // trading a bit of memory for far less churn during scrolling.
+      minCacheExtent: 800,
       itemBuilder: (ctx, i) {
         if (i == display.length) {
           // Load-more spinner at the visual top (oldest end)
@@ -815,6 +822,10 @@ class ChatScreenState extends State<ChatScreen> {
           );
         }
 
+        // Note: scrollable_positioned_list already wraps every item in its
+        // own RepaintBoundary by default (addRepaintBoundaries: true), so no
+        // manual one is needed here — adding a second nested one would just
+        // be a redundant compositing layer.
         final msgWidget = AnimatedContainer(
           duration: const Duration(milliseconds: 500),
           color: msg.id == _highlightedId
@@ -1202,6 +1213,13 @@ class _MessageBubble extends StatelessWidget {
                   width: 240,
                   height: 240,
                   fit: BoxFit.cover,
+                  // Decode at ~2x the display size instead of full camera
+                  // resolution — the #1 cause of scroll jank in image-heavy
+                  // lists is decoding multi-megapixel photos just to shrink
+                  // them down to a 240x240 bubble on every frame they're
+                  // built.
+                  cacheWidth: 480,
+                  cacheHeight: 480,
                 )
               else
                 CachedNetworkImage(
@@ -1209,6 +1227,8 @@ class _MessageBubble extends StatelessWidget {
                   width: 240,
                   height: 240,
                   fit: BoxFit.cover,
+                  memCacheWidth: 480,
+                  memCacheHeight: 480,
                   placeholder: (context, url) => Container(
                     width: 240,
                     height: 240,

@@ -297,22 +297,39 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    // IndexedStack keeps every tab's widget tree (and its state) alive so
+    // switching tabs doesn't lose scroll position or re-run stream setup —
+    // but that also means any AnimationController in a hidden tab (compass
+    // rotation, vinyl spin, sticky-note animations) keeps ticking every
+    // frame even while offstage, competing for the active tab's frame
+    // budget. TickerMode(enabled: false) pauses those tickers for hidden
+    // tabs without disposing their state — cheap, safe, and reversible the
+    // moment a tab becomes active again.
     final screens = [
-      HomeScreen(
-        onNavigate: _goToTab,
-        onSelectMessage: (id) {
-          LogService.log('Selected message from home: $id');
-          setState(() => _currentIndex = 1);
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            _chatKey.currentState?.scrollToMessageById(id);
-          });
-        },
+      TickerMode(
+        enabled: _currentIndex == 0,
+        child: HomeScreen(
+          onNavigate: _goToTab,
+          onSelectMessage: (id) {
+            LogService.log('Selected message from home: $id');
+            setState(() => _currentIndex = 1);
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _chatKey.currentState?.scrollToMessageById(id);
+            });
+          },
+        ),
       ),
-      ChatScreen(
-        key: _chatKey,
-        isActive: _currentIndex == 1,
+      TickerMode(
+        enabled: _currentIndex == 1,
+        child: ChatScreen(
+          key: _chatKey,
+          isActive: _currentIndex == 1,
+        ),
       ),
-      const TodoScreen(),
+      TickerMode(
+        enabled: _currentIndex == 2,
+        child: const TodoScreen(),
+      ),
     ];
 
     return PopScope(

@@ -220,6 +220,11 @@ class _GalleryScreenState extends State<GalleryScreen> {
                           child: Image.file(
                             File(snap.imagePath),
                             fit: BoxFit.cover,
+                            // Grid cells are ~160-180 logical px wide — decoding
+                            // full camera-resolution photos for every cell in a
+                            // scrolling 2-column grid is the single biggest
+                            // cause of jank here.
+                            cacheWidth: 360,
                           ),
                         ),
                       ),

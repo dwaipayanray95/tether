@@ -32,7 +32,8 @@ only) — everything below is its own widget file under `lib/widgets/home/`.
 ### 👤 Partner Info & Snaps
 - **Profile fields:** `partner_info_screen.dart` + `partner_profile_model.dart` (`PartnerProfile`) — birthday/zodiac, clothing sizes map, shoe/ring size, allergies, food dislikes, favorite foods, favorite color, top-5 favorite movies.
 - **Anniversary (shared field):** `partner_info_screen.dart` + `firestore_service.dart` → `updateAnniversary()`.
-- **Snap send / local storage / Drive backup:** `widgets/home/quick_snap.dart` + `local_storage_service.dart` (saves under `getApplicationDocumentsDirectory()/snaps/`, uploads PNG to Drive via `GoogleDriveService`).
+- **Snap send / local storage:** `widgets/home/quick_snap.dart` + `local_storage_service.dart` (saves under `getApplicationDocumentsDirectory()/snaps/`). Saving/downloading a Snap is LOCAL-ONLY now — it does not touch Drive at that moment.
+- **Snap → Drive sync (batched, not per-action):** `BackupService._syncSnaps()`, called from `runBackup()`. Uploads any local snap missing a `driveFileId` (`LocalStorageService.pendingUploadSnaps()`), and deletes any Drive file whose local copy was removed (`LocalStorageService.pendingDeletionDriveFileIds()` — deleting a snap records its `driveFileId` into `pending_drive_deletions.json` instead of calling Drive immediately). This deliberately mirrors the rest of the backup pipeline's "batch every Drive touch into one run" pattern — see the hard rule below.
 - **Full gallery / delete:** `gallery_screen.dart`.
 
 ### 🔔 Notifications & FCM

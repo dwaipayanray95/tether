@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:path_provider/path_provider.dart';
-import 'google_drive_service.dart';
 import 'log_service.dart';
 
 class LocalSnap {
@@ -38,8 +37,6 @@ class LocalSnap {
 }
 
 class LocalStorageService {
-  final GoogleDriveService _driveService = GoogleDriveService();
-
   Future<Directory> get _snapsDir async {
     final docs = await getApplicationDocumentsDirectory();
     final dir = Directory('${docs.path}/snaps');
@@ -47,6 +44,11 @@ class LocalStorageService {
       await dir.create(recursive: true);
     }
     return dir;
+  }
+
+  Future<File> get _pendingDeletionsFile async {
+    final dir = await _snapsDir;
+    return File('${dir.path}/pending_drive_deletions.json');
   }
 
   Future<LocalSnap> saveSnap(Uint8List imageBytes, String caption, DateTime date, {String? driveFileId}) async {
@@ -116,15 +118,23 @@ class LocalStorageService {
     }
   }
 
+  /// Deletes the local snap immediately. If it had already been uploaded to
+  /// Drive, the Drive file itself is NOT deleted here — that would mean
+  /// every gallery delete is its own Drive round trip (the same per-action
+  /// Drive-touch pattern the rest of the backup pipeline deliberately
+  /// avoids, and a source of the Google auth UI flash). Instead the
+  /// driveFileId is recorded as a pending deletion, and the next
+  /// [BackupService.runBackup] run cleans it up in the same batch as
+  /// everything else it already syncs to Drive.
   Future<void> deleteSnap(LocalSnap snap) async {
     try {
       LogService.log('Local Storage: Deleting snap ${snap.id}');
-      
+
       // Read latest JSON from disk to get non-stale driveFileId from background upload
       final dir = await _snapsDir;
       final jsonFile = File('${dir.path}/snap_${snap.id}.json');
       String? driveFileId = snap.driveFileId;
-      
+
       if (await jsonFile.exists()) {
         final content = await jsonFile.readAsString();
         final json = jsonDecode(content) as Map<String, dynamic>;
@@ -138,13 +148,54 @@ class LocalStorageService {
       if (await imgFile.exists()) await imgFile.delete();
       if (await jsonFile.exists()) await jsonFile.delete();
 
-      // 2. Delete cloud backup if sync file ID exists
+      // 2. Defer the Drive-side cleanup to the next backup run.
       if (driveFileId != null) {
-        await _driveService.deleteFile(driveFileId);
+        await _recordPendingDeletion(driveFileId);
       }
       LogService.log('Local Storage: Snap ${snap.id} deleted successfully');
     } catch (e) {
       LogService.log('Local Storage Error: Failed to delete snap ${snap.id}: $e');
+    }
+  }
+
+  // ── Backup pipeline hooks (see BackupService._syncSnaps) ────────────────
+
+  /// Local snaps that exist on disk but have never been uploaded to Drive
+  /// (saved/downloaded since the last backup run, or the very first ever).
+  Future<List<LocalSnap>> pendingUploadSnaps() async {
+    final snaps = await loadSnaps();
+    return snaps.where((s) => s.driveFileId == null).toList();
+  }
+
+  Future<List<String>> pendingDeletionDriveFileIds() async {
+    try {
+      final file = await _pendingDeletionsFile;
+      if (!await file.exists()) return [];
+      final list = jsonDecode(await file.readAsString()) as List<dynamic>;
+      return list.cast<String>();
+    } catch (e) {
+      LogService.log('Local Storage Error: Failed to read pending deletions: $e');
+      return [];
+    }
+  }
+
+  Future<void> clearPendingDeletion(String driveFileId) async {
+    try {
+      final file = await _pendingDeletionsFile;
+      final current = await pendingDeletionDriveFileIds();
+      current.remove(driveFileId);
+      await file.writeAsString(jsonEncode(current));
+    } catch (e) {
+      LogService.log('Local Storage Error: Failed to clear pending deletion: $e');
+    }
+  }
+
+  Future<void> _recordPendingDeletion(String driveFileId) async {
+    final file = await _pendingDeletionsFile;
+    final current = await pendingDeletionDriveFileIds();
+    if (!current.contains(driveFileId)) {
+      current.add(driveFileId);
+      await file.writeAsString(jsonEncode(current));
     }
   }
 }

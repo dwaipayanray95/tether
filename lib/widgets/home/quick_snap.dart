@@ -14,7 +14,6 @@ import '../../services/firestore_service.dart';
 import '../../services/log_service.dart';
 import '../../services/fcm_service.dart';
 import '../../services/local_storage_service.dart';
-import '../../services/google_drive_service.dart';
 import '../../screens/gallery_screen.dart';
 import '../../services/crypto_service.dart';
 import '../../theme/app_theme.dart';
@@ -179,6 +178,8 @@ class _QuickSnapState extends State<QuickSnap> {
                     height: 200,
                     width: 200,
                     fit: BoxFit.cover,
+                    cacheWidth: 400,
+                    cacheHeight: 400,
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -245,20 +246,14 @@ class _QuickSnapState extends State<QuickSnap> {
 
                   final date = DateTime.now();
 
-                  // Save locally as a polaroid and backup to Google Drive
+                  // Save locally only — Drive upload is deferred to the next
+                  // BackupService.runBackup() run (see LocalStorageService.
+                  // pendingUploadSnaps()), so saving a snap never itself
+                  // triggers a Drive round trip.
                   if (saveLocally) {
                     try {
                       final polaroidBytes = await _renderPolaroidPNG(originalBytes, caption, date);
-                      final localSnap = await LocalStorageService().saveSnap(polaroidBytes, caption, date);
-
-                      // Asynchronously upload to Google Drive in background
-                      GoogleDriveService()
-                          .uploadSnap(polaroidBytes, 'snap_${localSnap.id}.png')
-                          .then((driveFileId) {
-                            if (driveFileId != null) {
-                              LocalStorageService().updateDriveFileId(localSnap.id, driveFileId);
-                            }
-                          });
+                      await LocalStorageService().saveSnap(polaroidBytes, caption, date);
                     } catch (e) {
                       // Silently catch local storage errors
                     }
@@ -523,20 +518,15 @@ class _QuickSnapState extends State<QuickSnap> {
                 try {
                   // Render the full polaroid in memory dynamically on-demand!
                   final polaroidBytes = await _renderPolaroidPNG(imageBytes, caption, date);
-                  
-                  final localSnap = await LocalStorageService().saveSnap(polaroidBytes, caption, date);
-                  
-                  // Backup to Google Drive asynchronously
-                  GoogleDriveService().uploadSnap(polaroidBytes, 'snap_${localSnap.id}.png').then((driveFileId) {
-                    if (driveFileId != null) {
-                      LocalStorageService().updateDriveFileId(localSnap.id, driveFileId);
-                    }
-                  });
+
+                  // Save locally only — Drive upload happens in the next
+                  // BackupService.runBackup() run, not right now.
+                  await LocalStorageService().saveSnap(polaroidBytes, caption, date);
 
                   if (ctx.mounted) {
                     ScaffoldMessenger.of(ctx).showSnackBar(
                       const SnackBar(
-                        content: Text('Saved to Polaroid Gallery & Google Drive!'),
+                        content: Text('Saved to Polaroid Gallery!'),
                         backgroundColor: Colors.green,
                       ),
                     );
@@ -587,6 +577,7 @@ class _QuickSnapState extends State<QuickSnap> {
                               child: Image.memory(
                                 imageBytes,
                                 fit: BoxFit.cover,
+                                cacheWidth: 640,
                               ),
                             ),
                             Positioned(
@@ -709,6 +700,7 @@ class _QuickSnapState extends State<QuickSnap> {
                                 child: Image.memory(
                                   partnerImageBytes,
                                   fit: BoxFit.cover,
+                                  cacheWidth: 640,
                                 ),
                               ),
                               Positioned(

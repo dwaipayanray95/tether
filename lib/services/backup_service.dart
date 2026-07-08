@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:cryptography/cryptography.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -11,6 +12,7 @@ import 'backup_merge.dart';
 import 'crypto_service.dart';
 import 'firestore_service.dart';
 import 'google_drive_service.dart';
+import 'local_storage_service.dart';
 import 'log_service.dart';
 
 /// Outcome of one [BackupService.runBackup] call, detailed enough to show
@@ -239,6 +241,16 @@ class BackupService {
         await _firestore.pruneDeletionsBefore(coupleId, newCursor.deletionsSyncedAt!);
       }
 
+      // 9. Sync locally-saved Snaps to/from Drive — independent of the JSON
+      // snapshot above (Snaps live as raw files in their own Drive folder,
+      // not inside the encrypted backup blob), so a failure here is logged
+      // but never fails the run that already succeeded above.
+      try {
+        await _syncSnaps();
+      } catch (e) {
+        LogService.log('Backup: snap sync failed (backup itself still succeeded): $e');
+      }
+
       final msg =
           'Backup completed — ${mergedTodos.length} todos, ${mergedComments.length} comments, ${mergedMessages.length} messages, ${mergedStickyNotes.length} sticky notes';
       LogService.log('Backup: $msg');
@@ -380,6 +392,44 @@ class BackupService {
       } else {
         await _drive.renameFileByName(op.from, op.to!);
       }
+    }
+  }
+
+  /// Uploads any locally-saved Snaps that haven't reached Drive yet, and
+  /// deletes any Drive Snap files whose local copy was removed since the
+  /// last run. This used to happen immediately on save/download/delete —
+  /// moved here so Snap actions never themselves trigger a Drive round
+  /// trip; they're just batched into the same backup cycle as everything
+  /// else, and reuse whatever access token this run already fetched.
+  Future<void> _syncSnaps() async {
+    final storage = LocalStorageService();
+
+    final pendingUploads = await storage.pendingUploadSnaps();
+    for (final snap in pendingUploads) {
+      try {
+        final bytes = await File(snap.imagePath).readAsBytes();
+        final driveFileId = await _drive.uploadSnap(bytes, 'snap_${snap.id}.png');
+        if (driveFileId != null) {
+          await storage.updateDriveFileId(snap.id, driveFileId);
+        }
+      } catch (e) {
+        LogService.log('Backup: snap upload failed for ${snap.id}: $e');
+      }
+    }
+
+    final pendingDeletions = await storage.pendingDeletionDriveFileIds();
+    for (final driveFileId in pendingDeletions) {
+      try {
+        final ok = await _drive.deleteFile(driveFileId);
+        if (ok) await storage.clearPendingDeletion(driveFileId);
+      } catch (e) {
+        LogService.log('Backup: snap delete failed for $driveFileId: $e');
+      }
+    }
+
+    if (pendingUploads.isNotEmpty || pendingDeletions.isNotEmpty) {
+      LogService.log(
+          'Backup: synced ${pendingUploads.length} snap upload(s), ${pendingDeletions.length} snap deletion(s)');
     }
   }
 
