@@ -476,6 +476,211 @@ Drive backup for a new feature; extend this pipeline instead.**
 
 ---
 
+## Local-First Architecture (in progress — see the plan)
+
+**Goal**: chat/todo/sticky-note screens read from an on-device SQLite database
+(via `drift`) instead of Firestore streams directly. Firestore stays a pure
+real-time sync relay between the two partners' devices — it is never written
+back to with recovered/old data. The Drive backup (above) remains the
+permanent full-history archive, unchanged. Full design + phase breakdown:
+`/Users/rayr/.claude/plans/delegated-zooming-lemur.md`.
+
+Note: the 90-day Firestore purge this architecture is designed around does
+**not exist yet** — confirmed during planning that no Cloud Function or
+scheduled job purges anything anywhere in this repo. Building the local DB
+is still worthwhile on its own merits (instant local search, offline reads);
+the purge job itself is explicitly out of scope until the local-DB safety
+net is proven trustworthy in production.
+
+**Status:**
+- ✅ **Phase 0 (scaffolding)**: `lib/local_db/` — `app_database.dart`
+  (`AppDatabase`, opens `tether_local.sqlite` via `path_provider`) +
+  `tables/{message,todo,comment,sticky_note}_table.dart`, mirroring each
+  existing model's `toMap()`/`fromMap()` shape field-for-field (`sentAt`/
+  `createdAt`/etc. stored as epoch millis for indexed sort; `updatedAt` is a
+  local sync-cursor bookkeeping column with no model equivalent, same
+  convention the backup pipeline already uses). Nothing reads/writes through
+  it yet — zero behavior change.
+- ✅ **Phase 1 (shadow mode)**: `local_sync_service.dart` (`LocalSyncService`)
+  — live Firestore listeners for messages (windowed to 50, matching today's
+  `messageStream()`, plus a message backfill via `fetchMessagesSince()`,
+  incremental after the first run — see the cursor note below), todos/
+  sticky-notes/comments
+  (unlimited listeners, already full-history since those screens have no
+  pagination today). `converters.dart` holds the pure Firestore-map→Drift-
+  companion conversion functions (unit tested in
+  `test/local_sync_merge_test.dart`, same convention as
+  `backup_merge_test.dart`). Started fire-and-forget from `main_shell.dart`'s
+  startup sequence. **Nothing reads from the local DB yet** — verify via
+  Diagnostics → "Inspect Local DB" (compares local row counts against live
+  Firestore `.count()`) before starting Phase 2. **Do not start Phase 2
+  until this has been dogfooded on a real device and counts checked out** —
+  that's the whole point of shipping this phase separately. **Verified**:
+  1115 messages backfilled and confirmed matching live Firestore counts on
+  a real device.
+- ✅ **Phase 2 (chat_screen.dart cutover)**: pagination
+  (`_loadInitialMessages`/`_loadMoreMessages`), the live top-50 window, and
+  search (`_activateSearch`) all now read from `MessageDao` instead of
+  Firestore directly. `_pageCursor` changed from a `DocumentSnapshot` to a
+  plain `sentAt` epoch-millis int — covered by dedicated pagination-boundary
+  tests in `test/message_dao_test.dart` (newest-first order, exclusive
+  cursor, no skip/duplicate across pages) since this was flagged as the
+  single most bug-prone part of the cutover. Search falls back to a direct
+  Firestore read if the local count looks lower than Firestore's live
+  `.count()`, in case the full-history backfill hasn't finished yet.
+  `firestore_service.dart`'s `sendMessage()` now does `.doc(message.id).set()`
+  instead of `.add()`, so the client-generated UUID becomes the actual
+  Firestore doc id — required for the optimistic local insert on send to
+  share one id with the eventual Firestore doc, no reconciliation needed.
+  **Message delivery status** (pending → sent → delivered → read) is fully
+  wired: sending inserts a `'pending'` row directly into the local DB (the
+  one exception to "writes always go through the Firestore echo"); the sync
+  listener flips it to `'sent'` once Firestore's snapshot metadata reports
+  `hasPendingWrites == false`; the *recipient's* `LocalSyncService`, the
+  first time it sees a new message that isn't its own and has actually
+  round-tripped the server, writes back `deliveredAt: serverTimestamp()`
+  via the new `FirestoreService.markMessageDelivered()` (mirrors
+  `markMessagesRead()`'s pattern, just triggered on receipt instead of on
+  chat-screen-open) — the sender's own listener then sees that field and
+  shows `'delivered'` (gray double tick); `'read'` is the pre-existing
+  `readBy`/`readTimes` logic, unchanged, and takes priority once true.
+  Reactions/read-receipt live updates, voice note playback, and image
+  rendering were all left untouched — they operate on the same `Message`
+  model shape regardless of source.
+
+  **A real production bug was found and fixed during this phase**, worth
+  knowing about since the same pattern can recur: `messageFromRow()`
+  originally used bare `{}` as the fallback for null `reactions`/
+  `readTimes` fields — in Dart, an untyped `{}` map literal defaults to
+  `Map<dynamic, dynamic>` at runtime, not `Map<String, dynamic>`, even when
+  it visually sits inside a `Map<String, dynamic>` literal. `Message.fromMap()`'s
+  `as Map<String, dynamic>?` cast on that then throws, and since the
+  original code converted the whole row list via a single `.map().toList()`,
+  ONE throwing conversion silently killed the *entire* message list — which
+  is nearly every message, since most have no reactions/read receipts.
+  Fixed by explicitly typing the fallback (`<String, dynamic>{}`) and by
+  converting row-by-row with per-row try/catch + logging (`_applyRows()` in
+  chat_screen.dart, mirrored in `TodoDao.watchAllAsModels()`/
+  `CommentDao.watchForTodoAsModels()` below) so a single bad row is skipped
+  and logged instead of taking the whole screen down. Regression-tested in
+  `test/local_sync_merge_test.dart`'s `messageFromRow` group — reproduced
+  the exact crash first, then verified the fix.
+- ✅ **Phase 3 (todo_screen.dart / sticky_board.dart cutover)**: same
+  pattern as Phase 2. `TodoDao.watchAllAsModels()`/`watchByIdAsModel()` and
+  `CommentDao.watchForTodoAsModels()` (both in `lib/local_db/daos/`) convert
+  row-by-row with per-row try/catch, same lesson as the message bug above.
+  `todo_screen.dart`'s four Firestore streams (`todoStream`, `commentStream`
+  ×2, `todoDocStream`) all replaced with their local-DB equivalents; writes
+  unchanged (still go through `FirestoreService`). `sticky_board.dart`'s two
+  `stickyNotesStream()` usages (main board + archive sheet) replaced with
+  `StickyNoteDao.watchAll()`, reading typed fields (`note.textContent`,
+  `note.isArchived`, etc.) instead of fragile `doc['field']` map access —
+  there's no dedicated sticky-note model, so the Drift-generated `StickyNote`
+  row class is used directly as the model. `TodoItem.fromMap()` was already
+  defensive about the checklist-items-Map-cast pattern (uses
+  `Map<String, dynamic>.from(item as Map)`), so it didn't need the same fix
+  messages needed. Notification scheduling (`scheduleTodoReminder`,
+  `syncTodoNotifications`, `cancelTodoReminder`) untouched and confirmed
+  unaffected — `todo.id` and decrypted-title flow are identical to before,
+  only the `TodoItem` list's source changed.
+- ✅ **Phase 4 (BackupService data-source switch)**: `runBackup()`'s four
+  delta fetches (`fetchTodosSince`/`fetchCommentsSince`/`fetchMessagesSince`/
+  `fetchStickyNotesSince`) now read `TodoDao`/`CommentDao`/`MessageDao`/
+  `StickyNoteDao`'s new `fetchSince()` methods instead of calling
+  `FirestoreService` directly — same "where updatedAt > cursor" semantics
+  (comments use `createdAt`, unchanged). Each DAO's `fetchSince()` returns
+  the exact Firestore-delta shape (`Map<String, dynamic>` with an `'id'`
+  key, ISO-8601 string dates) via new `*MapFromRow()` functions in
+  `converters.dart` — this is the SAME map shape `Message.fromMap()`/
+  `TodoItem.fromMap()`/etc. already consume, so `backup_merge.dart`'s pure
+  functions (`mergeDelta`, `sanitizeForJson`, `applyTombstones`,
+  `maxTimestampField`) needed **zero changes**, exactly as planned — local
+  DB rows store dates as epoch-millis ints, so this conversion step is
+  load-bearing, not cosmetic (skipping it would silently break every
+  `DateTime.parse()` call downstream). `_verifyIntegrity()` was deliberately
+  left untouched, still comparing against live Firestore
+  (`countTodos`/`countMessages`/`countStickyNotes`) — it exists specifically
+  to catch a broken sync silently under-reporting, so it must never be
+  satisfied by the same local copy it's supposed to be checking against.
+  New tests: `MessageDao.fetchSince()`'s cursor semantics (null → everything,
+  strict-after filtering, correct delta shape) in `test/message_dao_test.dart`.
+- ✅ **Post-Phase-4 fix: incremental message backfill.**
+  `LocalSyncService._backfillFullMessageHistory()` originally called
+  `fetchMessagesSince(coupleId, null)` — unconditionally "everything" — on
+  *every single app launch*, not just fresh installs, re-reading the
+  entire message history from Firestore every time even though the local
+  DB already had it all from last session. Fixed with a new
+  `local_sync_cursor_store.dart` (`LocalSyncCursorStore`, SharedPreferences-
+  backed, same pattern as `BackupCursorStore` but deliberately a separate
+  cursor — this tracks local-DB sync freshness, not Drive backup
+  freshness) persisting the newest message `updatedAt` actually backfilled;
+  subsequent launches only fetch the delta. New pure helper
+  `converters.dart` → `maxRawTimestampField()` computes that cursor from a
+  raw (pre-sanitized) Firestore fetch — unlike `backup_merge.dart`'s
+  `maxTimestampField()`, which only ever sees already-sanitized ISO
+  strings, this handles the mixed `Timestamp`/`String` shape a fresh fetch
+  actually has. This directly reduces the Firestore read-count cost
+  flagged earlier in the project, on top of the startup-time win.
+- ✅ **Phase 5 (fresh-install hydration)**: new
+  `lib/services/local_db_hydration_service.dart` —
+  `LocalDbHydrationService.hydrateFromBackupAndLiveGap()` calls the existing
+  `BackupService.restoreFromBackup(dryRun: false)` unchanged (already merges
+  the Drive backup with live Firestore in memory, live wins conflicts), then
+  writes the merged `BackupSnapshot`'s four lists into the local DB via
+  `messageRowFromFirestoreMap`/`todoRowFromFirestoreMap`/
+  `commentRowFromFirestoreMap`/`stickyNoteRowFromFirestoreMap` +
+  each DAO's `upsertBatch()` — the exact same converter functions and write
+  path `LocalSyncService`'s live listeners already use, so this is a thin
+  orchestration layer, not new conversion logic. Row-by-row try/catch (same
+  defensive pattern as Phase 2's bug fix) so one malformed archived doc can't
+  abort the whole restore; docs missing an `id` (or, for comments, `todoId`)
+  are skipped and logged. Never writes back to Firestore — this only makes
+  `restoreFromBackup()`'s already-computed result durable somewhere the UI
+  reads from, instead of discarding it after seeding the backup cursor.
+  `main_shell.dart`'s `_runFullHistoryRestore()` now calls this instead of
+  `BackupService` directly; `resetDecryptionState()` call after is unchanged.
+  New tests in `test/local_db_hydration_test.dart` (backup-shaped doc list →
+  DAO upsert, for all four tables, plus the missing-id-skip behavior).
+- ✅ **Post-Phase-5 fix: messages listener was silently deleting real
+  messages from the local DB.** Found via device testing: "Inspect Local
+  DB" showed a persistent, non-recovering message-count deficit vs. live
+  Firestore (e.g. 1130 vs 1132) that a fresh app restart didn't fix.
+  Root cause: `LocalSyncService._watchMessages()`'s query is windowed
+  (`.orderBy('sentAt', descending: true).limit(50)`) — whenever a new
+  message pushes the oldest message out of that top-50 window, Firestore's
+  snapshot listener reports a `DocumentChangeType.removed` doc-change for
+  it, exactly as if it had been deleted. The listener code didn't
+  distinguish "fell out of a windowed query" from "actually deleted," so
+  it called `messageDao.deleteById()` on it — silently erasing one real
+  message from the local DB every time a new message was sent, forever.
+  There is no `deleteMessage()` anywhere in this codebase (messages are
+  never actually deletable), so a `removed` event on this listener can
+  never legitimately mean a real delete. Fixed by no longer treating
+  `removed` as a deletion on the messages listener at all (todos/sticky
+  notes/comments listeners are unaffected — their queries have no
+  `.limit`, so `removed` there is unambiguous and still correctly means a
+  real delete). Since already-affected devices' backfill cursor (Post-
+  Phase-4 fix) had already advanced past the erased messages and would
+  never re-fetch them, `local_sync_cursor_store.dart`'s key was bumped
+  (`_v1` → `_v2`) to force exactly one more full backfill on next launch,
+  self-healing any data this bug already erased. Also found and fixed in
+  the same pass: two more `FloatingActionButton`s (chat's scroll-to-bottom
+  button in `chat_screen.dart`, the snap-send button in
+  `widgets/home/quick_snap.dart`) were missing `heroTag: null`, causing
+  the same "multiple heroes share the same tag" collision documented under
+  Phase 2 to recur — only `todo_screen.dart`'s FAB had been fixed
+  previously; these two were missed because the earlier investigation
+  assumed (incorrectly) there was only one `FloatingActionButton` in the
+  app.
+
+**E2EE posture — do not change:** the local DB stores ciphertext exactly
+like Firestore does today. No plaintext at rest locally. Decryption stays
+lazy, in-memory, cached per-screen-instance — identical to the existing
+`_decryptedTextCache` pattern in `chat_screen.dart`/`todo_screen.dart`, just
+fed by Drift rows instead of Firestore docs.
+
+---
+
 ## Colour Palette (`app_theme.dart`)
 
 ```dart

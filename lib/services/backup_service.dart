@@ -6,6 +6,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../config/backup_config.dart';
 import '../models/backup_cursor_model.dart';
 import '../models/backup_snapshot_model.dart';
+import '../local_db/app_database.dart';
+import '../local_db/daos/message_dao.dart';
+import '../local_db/daos/todo_dao.dart';
+import '../local_db/daos/comment_dao.dart';
+import '../local_db/daos/sticky_note_dao.dart';
 import 'auth_service.dart';
 import 'backup_cursor_store.dart';
 import 'backup_merge.dart';
@@ -74,6 +79,10 @@ class BackupService {
   final GoogleDriveService _drive = GoogleDriveService();
   final AuthService _auth = AuthService();
   final BackupCursorStore _cursorStore = BackupCursorStore();
+  final MessageDao _messageDao = MessageDao(AppDatabase.instance());
+  final TodoDao _todoDao = TodoDao(AppDatabase.instance());
+  final CommentDao _commentDao = CommentDao(AppDatabase.instance());
+  final StickyNoteDao _stickyNoteDao = StickyNoteDao(AppDatabase.instance());
 
   List<Map<String, dynamic>> _sanitizeList(List<Map<String, dynamic>> docs) =>
       docs.map((d) => sanitizeForJson(d) as Map<String, dynamic>).toList();
@@ -113,6 +122,35 @@ class BackupService {
     LogService.log('Backup: restored ${preferences.length} preference(s) locally');
   }
 
+  /// Fixes the "Never backed up yet" display on a fresh install where a
+  /// backup already exists on Drive from a previous install. This is
+  /// display-only — it does NOT merge/restore any data, just checks Drive's
+  /// file metadata for the last-modified time/size and writes that into the
+  /// local cursor. Deliberately independent of [runBackup]'s partner-key
+  /// requirement: on a fresh install right after PIN restore, the partner's
+  /// public key may not have synced from Firestore yet, so runBackup() can
+  /// bail out early without ever touching the cursor — that shouldn't also
+  /// mean the UI lies about there being no backup at all. No-ops (and does
+  /// no Drive call) once the cursor already has a value, so this is cheap
+  /// to call on every app open.
+  Future<void> reconcileCursorWithDriveIfNeeded() async {
+    final cursor = await _cursorStore.load();
+    if (cursor.lastBackupAt != null) return;
+
+    try {
+      final metadata = await _drive.getFileMetadata(BackupConfig.latestBackupFileName);
+      if (metadata == null) return;
+      await _cursorStore.save(cursor.copyWith(
+        lastBackupAt: metadata.modifiedTime,
+        lastBackupSizeBytes: metadata.sizeBytes,
+      ));
+      LogService.log(
+          'Backup: reconciled cursor with existing Drive backup from ${metadata.modifiedTime}');
+    } catch (e) {
+      LogService.log('Backup: cursor reconciliation failed: $e');
+    }
+  }
+
   /// Runs one incremental backup cycle. Safe to retry — nothing is
   /// advanced/promoted unless the run fully succeeds.
   Future<BackupRunResult> runBackup() async {
@@ -128,15 +166,17 @@ class BackupService {
       final sharedKey = await CryptoService().getSharedKey(partnerPubKey);
 
       // 1. Fetch deltas since the cursor (or everything, on the very first
-      // run when the cursor fields are all null).
-      final newTodos =
-          _sanitizeList(await _firestore.fetchTodosSince(coupleId, cursor.todosSyncedAt));
-      final newComments =
-          _sanitizeList(await _firestore.fetchCommentsSince(cursor.commentsSyncedAt));
-      final newMessages = _sanitizeList(
-          await _firestore.fetchMessagesSince(coupleId, cursor.messagesSyncedAt));
-      final newStickyNotes = _sanitizeList(
-          await _firestore.fetchStickyNotesSince(coupleId, cursor.stickyNotesSyncedAt));
+      // run when the cursor fields are all null). Reads from the local DB
+      // (kept current by LocalSyncService) instead of Firestore directly —
+      // same delta shape either way, see converters.dart's *MapFromRow()
+      // functions. _verifyIntegrity() below deliberately still compares
+      // against LIVE Firestore, not this local copy, so a broken sync
+      // can't silently pass its own integrity check.
+      final newTodos = _sanitizeList(await _todoDao.fetchSince(cursor.todosSyncedAt));
+      final newComments = _sanitizeList(await _commentDao.fetchSince(cursor.commentsSyncedAt));
+      final newMessages = _sanitizeList(await _messageDao.fetchSince(cursor.messagesSyncedAt));
+      final newStickyNotes =
+          _sanitizeList(await _stickyNoteDao.fetchSince(cursor.stickyNotesSyncedAt));
 
       final myUid = _auth.currentUser?.uid;
       final partnerUid = await _auth.getPartnerUid();
@@ -427,9 +467,39 @@ class BackupService {
       }
     }
 
-    if (pendingUploads.isNotEmpty || pendingDeletions.isNotEmpty) {
+    // Recovers snaps that exist on Drive but not locally — the case on
+    // every fresh install, since local storage is wiped on reinstall but
+    // Drive isn't. Matches by the snap_{id}.png filename uploadSnap() uses.
+    var recovered = 0;
+    try {
+      final driveFiles = await _drive.listSnapFiles();
+      final localIds = await storage.localSnapIds();
+      final pendingDeletionIds = pendingDeletions.toSet();
+      for (final file in driveFiles) {
+        final match = RegExp(r'^snap_(\d+)\.png$').firstMatch(file.name);
+        if (match == null) continue;
+        final id = match.group(1)!;
+        if (localIds.contains(id)) continue;
+        // Don't resurrect a snap the user just deleted locally and is
+        // waiting on this very run to remove from Drive too.
+        if (pendingDeletionIds.contains(file.id)) continue;
+        try {
+          final bytes = await _drive.downloadFileBytes(file.id);
+          if (bytes != null) {
+            await storage.saveRecoveredSnap(id, bytes, file.id);
+            recovered++;
+          }
+        } catch (e) {
+          LogService.log('Backup: snap recovery failed for ${file.name}: $e');
+        }
+      }
+    } catch (e) {
+      LogService.log('Backup: snap recovery listing failed: $e');
+    }
+
+    if (pendingUploads.isNotEmpty || pendingDeletions.isNotEmpty || recovered > 0) {
       LogService.log(
-          'Backup: synced ${pendingUploads.length} snap upload(s), ${pendingDeletions.length} snap deletion(s)');
+          'Backup: synced ${pendingUploads.length} snap upload(s), ${pendingDeletions.length} snap deletion(s), $recovered snap(s) recovered from Drive');
     }
   }
 

@@ -131,37 +131,43 @@ class SettingsScreen extends StatelessWidget {
     required VoidCallback onTap,
     Color? textColor,
   }) {
+    // Background belongs on Material, not an outer DecoratedBox, so
+    // ListTile's ink splash renders visibly — same fix as
+    // diagnostics_screen.dart's _buildTile().
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: AppTheme.surface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppTheme.divider),
       ),
-      child: ListTile(
-        onTap: onTap,
-        leading: Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: AppTheme.background,
-            borderRadius: BorderRadius.circular(10),
+      clipBehavior: Clip.antiAlias,
+      child: Material(
+        color: AppTheme.surface,
+        child: ListTile(
+          onTap: onTap,
+          leading: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: AppTheme.background,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: textColor ?? AppTheme.primary, size: 20),
           ),
-          child: Icon(icon, color: textColor ?? AppTheme.primary, size: 20),
-        ),
-        title: Text(
-          title,
-          style: GoogleFonts.dmSans(
-            fontSize: 15,
-            fontWeight: FontWeight.w600,
-            color: textColor ?? AppTheme.textDark,
+          title: Text(
+            title,
+            style: GoogleFonts.dmSans(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: textColor ?? AppTheme.textDark,
+            ),
           ),
+          subtitle: Text(
+            subtitle,
+            style: GoogleFonts.dmSans(fontSize: 12, color: AppTheme.textMuted),
+          ),
+          trailing: const Icon(Icons.chevron_right_rounded,
+              color: AppTheme.textMuted, size: 20),
         ),
-        subtitle: Text(
-          subtitle,
-          style: GoogleFonts.dmSans(fontSize: 12, color: AppTheme.textMuted),
-        ),
-        trailing: const Icon(Icons.chevron_right_rounded,
-            color: AppTheme.textMuted, size: 20),
       ),
     );
   }

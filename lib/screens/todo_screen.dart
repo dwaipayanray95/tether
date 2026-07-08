@@ -12,6 +12,9 @@ import '../services/notification_service.dart';
 import '../services/log_service.dart';
 import '../theme/app_theme.dart';
 import '../services/crypto_service.dart';
+import '../local_db/app_database.dart';
+import '../local_db/daos/todo_dao.dart';
+import '../local_db/daos/comment_dao.dart';
 import 'package:google_fonts/google_fonts.dart';
 class TodoScreen extends StatefulWidget {
   const TodoScreen({super.key});
@@ -23,6 +26,7 @@ class TodoScreen extends StatefulWidget {
 class _TodoScreenState extends State<TodoScreen> {
   final _firestore = FirestoreService();
   final _auth = AuthService();
+  final _todoDao = TodoDao(AppDatabase.instance());
   final _titleCtrl = TextEditingController();
   final _detailsCtrl = TextEditingController();
   static const String _coupleId = coupleId;
@@ -386,7 +390,19 @@ class _TodoScreenState extends State<TodoScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Our List')),
+      // heroTag: null — main_shell.dart's IndexedStack keeps Home/Chat/Todo
+      // all mounted simultaneously, and Flutter's own Hero tree-traversal
+      // has a known quirk with IndexedStack/Offstage subtrees where even a
+      // uniquely-tagged Hero can be "found" more than once during a
+      // transition (a prior fix here that just gave this FAB a unique
+      // string tag did NOT resolve the "multiple heroes share the same
+      // tag" error for exactly this reason). Setting heroTag to null
+      // removes this FAB from Hero handling entirely, which is Flutter's
+      // own documented way to opt a FAB out of hero animations altogether
+      // — there's no flight animation lost here since IndexedStack tab
+      // switches were never animating this FAB via Hero in the first place.
       floatingActionButton: FloatingActionButton(
+        heroTag: null,
         onPressed: _showAddDialog,
         backgroundColor: AppTheme.primary,
         foregroundColor: Colors.white,
@@ -394,7 +410,7 @@ class _TodoScreenState extends State<TodoScreen> {
         child: const Icon(Icons.add),
       ),
       body: StreamBuilder<List<TodoItem>>(
-        stream: _firestore.todoStream(_coupleId),
+        stream: _todoDao.watchAllAsModels(),
         builder: (context, snap) {
           if (!snap.hasData) {
             return const Center(child: CircularProgressIndicator());
@@ -772,10 +788,14 @@ class _TodoTile extends StatelessWidget {
         child: Container(
           margin: isStacked ? EdgeInsets.zero : const EdgeInsets.only(bottom: 6),
           decoration: BoxDecoration(
-            color: isStacked ? Colors.transparent : AppTheme.surface,
             borderRadius: isStacked ? BorderRadius.zero : BorderRadius.circular(14),
             border: isStacked ? null : Border.all(color: AppTheme.divider),
           ),
+          clipBehavior: Clip.antiAlias,
+          // Background belongs on Material, not this outer DecoratedBox, so
+          // ListTile's ink splash renders visibly.
+          child: Material(
+          color: isStacked ? Colors.transparent : AppTheme.surface,
           child: ListTile(
             dense: true,
             visualDensity: const VisualDensity(horizontal: 0, vertical: -2),
@@ -848,7 +868,7 @@ class _TodoTile extends StatelessWidget {
                     ),
                   ),
             trailing: StreamBuilder<List<TodoComment>>(
-              stream: firestore.commentStream(coupleId, todo.id),
+              stream: CommentDao(AppDatabase.instance()).watchForTodoAsModels(todo.id),
               builder: (context, snap) {
                 final count = snap.data?.length ?? 0;
                 return Row(
@@ -869,6 +889,7 @@ class _TodoTile extends StatelessWidget {
                 );
               },
             ),
+          ),
           ),
         ),
       ),
@@ -1197,8 +1218,8 @@ class _TodoDetailSheetState extends State<_TodoDetailSheet> {
       expand: false,
       initialChildSize: 0.75,
       maxChildSize: 0.92,
-      builder: (context, scrollCtrl) => StreamBuilder<TodoItem>(
-        stream: widget.firestore.todoDocStream(widget.coupleId, widget.todo.id),
+      builder: (context, scrollCtrl) => StreamBuilder<TodoItem?>(
+        stream: TodoDao(AppDatabase.instance()).watchByIdAsModel(widget.todo.id),
         initialData: widget.todo,
         builder: (context, snapshot) {
           final currentTodo = snapshot.data ?? widget.todo;
@@ -1552,8 +1573,8 @@ class _TodoDetailSheetState extends State<_TodoDetailSheet> {
               // Comments list
               Expanded(
                 child: StreamBuilder<List<TodoComment>>(
-                  stream: widget.firestore
-                      .commentStream(widget.coupleId, currentTodo.id),
+                  stream: CommentDao(AppDatabase.instance())
+                      .watchForTodoAsModels(currentTodo.id),
                   builder: (context, snap) {
                     if (!snap.hasData) {
                       return const Center(child: CircularProgressIndicator());

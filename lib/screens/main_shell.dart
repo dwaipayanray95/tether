@@ -17,6 +17,9 @@ import '../services/log_service.dart';
 import '../services/google_drive_service.dart';
 import '../services/crypto_service.dart';
 import '../services/foreground_backup_scheduler.dart';
+import '../services/backup_service.dart';
+import '../services/local_db_hydration_service.dart';
+import '../services/local_sync_service.dart';
 import '../config/env_config.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -62,8 +65,18 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       _checkForUpdate();
       // Proactively check and request all permissions
       _requestAllPermissions();
+      // Start the local-DB sync engine (shadow mode — see AGENTS.md
+      // "Local-First Architecture"). Fire-and-forget: this is a pure
+      // Firestore-read mirror, no Drive/crypto dependency, so it doesn't
+      // need to block on anything else in this startup sequence.
+      unawaited(LocalSyncService().startAll(_coupleId));
       // Ensure E2EE is set up and key is backed up
       await _checkE2EESetup();
+      // Fresh installs have no local backup cursor even if a backup already
+      // exists on Drive from before — fix that display gap before (and
+      // independent of) the full backup pipeline below, which can bail out
+      // early if the partner's key hasn't synced yet.
+      await BackupService().reconcileCursorWithDriveIfNeeded();
       // Run the full-state backup if it's been due 24h+ since the last one
       await ForegroundBackupScheduler.runIfDue();
     });
@@ -393,6 +406,53 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
 
   static const _e2eeVerifiedKey = 'e2ee_backup_verified';
 
+  /// Runs after E2EE keys are restored on a fresh install: seeds the local
+  /// backup cursor/preferences from the Drive backup + current live
+  /// Firestore state, then writes the merged result into the local DB
+  /// (LocalDbHydrationService) — the thing chat_screen.dart/todo_screen.dart
+  /// actually read from. Deliberately does NOT write anything back into
+  /// Firestore — purged (90+ day old) history stays purged there by design;
+  /// Firestore is only ever the rolling live delivery layer, never re-seeded
+  /// from the archive. This closes the one remaining gap noted in
+  /// AGENTS.md/working.md: history Firestore has already purged is now
+  /// restored into the local DB the UI reads from, not just held in memory
+  /// and discarded.
+  Future<void> _runFullHistoryRestore() async {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: Card(
+          child: Padding(
+            padding: EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(color: AppTheme.primary),
+                SizedBox(height: 16),
+                Text('Restoring your history...'),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    try {
+      await LocalDbHydrationService().hydrateFromBackupAndLiveGap();
+    } catch (e) {
+      LogService.log('Full history restore failed: $e');
+    }
+
+    // Newly-hydrated messages need decrypting once the chat stream
+    // picks them up — clear again so nothing that arrived during this
+    // restore stays stuck on a pre-restore cached (or failed) value.
+    _chatKey.currentState?.resetDecryptionState();
+
+    if (mounted) Navigator.pop(context); // dismiss "Restoring your history..."
+  }
+
   Future<void> _checkE2EESetup() async {
     if (!mounted) return;
 
@@ -568,7 +628,19 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                   final prefs = await SharedPreferences.getInstance();
                   await prefs.setBool(_e2eeVerifiedKey, true);
 
+                  // ChatScreen may have already tried (and cached failures
+                  // for) decrypting messages before keys existed — clear
+                  // that stale state now that real keys are available.
+                  _chatKey.currentState?.resetDecryptionState();
+
                   if (ctx.mounted) Navigator.pop(ctx);
+
+                  // Now that keys can actually decrypt/derive the shared
+                  // secret, pull the full-history backup and re-hydrate
+                  // anything purged from live Firestore (see
+                  // BackupService.restoreFromBackup). This is what makes a
+                  // fresh install whole, not just current-since-90-days.
+                  await _runFullHistoryRestore();
                 } catch (e) {
                   setDialogState(() => error = 'Incorrect PIN. Try again.');
                 }
@@ -634,6 +706,10 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                   await _firestore.registerPublicKey(_myPresenceKey, publicKey);
                   final prefs = await SharedPreferences.getInstance();
                   await prefs.setBool(_e2eeVerifiedKey, true);
+
+                  // Same reasoning as the restore dialog — clear any
+                  // decryption attempted before keys existed.
+                  _chatKey.currentState?.resetDecryptionState();
 
                   if (ctx.mounted) Navigator.pop(ctx);
                 } catch (e) {

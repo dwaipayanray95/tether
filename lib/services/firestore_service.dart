@@ -292,11 +292,19 @@ class FirestoreService {
   Future<void> sendMessage(String coupleId, Message message,
       {String senderName = ''}) async {
     LogService.log('Sending message: ${message.text.substring(0, message.text.length > 20 ? 20 : message.text.length)}...');
+    // .doc(message.id).set() instead of .add() — chat_screen.dart already
+    // generates a client-side UUID for the message before this call. Using
+    // that as the actual Firestore doc ID (rather than letting .add()
+    // assign its own) is what lets the local-first architecture's
+    // optimistic local-DB insert on send share one id with the eventual
+    // Firestore doc, with no reconciliation step needed once the write
+    // round-trips — see local_sync_service.dart / AGENTS.md.
     await _db
         .collection('couples')
         .doc(coupleId)
         .collection('messages')
-        .add({
+        .doc(message.id)
+        .set({
       ...message.toMap(),
       'updatedAt': FieldValue.serverTimestamp(),
     });
@@ -339,6 +347,21 @@ class FirestoreService {
       }
     }
     await batch.commit();
+  }
+
+  /// Written by the RECIPIENT the first time their device's local sync
+  /// listener observes a new message — mirrors markMessagesRead()'s
+  /// pattern, just triggered on receipt instead of on chat-screen-open.
+  /// Lets the sender's own device show a "delivered" (double tick, gray)
+  /// receipt without needing the recipient to actually open the chat —
+  /// see AGENTS.md's message delivery status design.
+  Future<void> markMessageDelivered(String coupleId, String messageId) async {
+    await _db
+        .collection('couples')
+        .doc(coupleId)
+        .collection('messages')
+        .doc(messageId)
+        .update({'deliveredAt': FieldValue.serverTimestamp()});
   }
 
   Stream<int> unreadCountStream(String coupleId, String myUid) {
@@ -685,6 +708,7 @@ class FirestoreService {
     return snap.data();
   }
 
+
   // ── Backup pipeline: cheap integrity counts ─────────────────────────────
   //
   // Firestore's count() aggregation returns a collection's document count
@@ -719,6 +743,15 @@ class FirestoreService {
         .collection('sticky_notes')
         .count()
         .get();
+    return agg.count ?? 0;
+  }
+
+  /// collectionGroup count across every todo's comments subcollection — same
+  /// scoping caveat as fetchCommentsSince()/the collectionGroup listener in
+  /// local_sync_service.dart (safe here because this project only ever has
+  /// the one couple this app is built for).
+  Future<int> countComments() async {
+    final agg = await _db.collectionGroup('comments').count().get();
     return agg.count ?? 0;
   }
 }

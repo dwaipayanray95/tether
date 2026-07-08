@@ -33,6 +33,7 @@ class _BackupScreenState extends State<BackupScreen> {
   }
 
   Future<void> _loadCursor() async {
+    await BackupService().reconcileCursorWithDriveIfNeeded();
     final cursor = await BackupCursorStore().load();
     if (mounted) setState(() => _cursor = cursor);
   }

@@ -9,7 +9,6 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter_sound/flutter_sound.dart';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -23,6 +22,9 @@ import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
 import '../services/log_service.dart';
 import '../services/notification_service.dart';
+import '../local_db/app_database.dart';
+import '../local_db/converters.dart';
+import '../local_db/daos/message_dao.dart';
 import '../theme/app_theme.dart';
 
 const _reactionEmojis = [
@@ -67,18 +69,29 @@ class ChatScreenState extends State<ChatScreen> {
   final _searchCtrl = TextEditingController();
   static const String _coupleId = coupleId;
 
+  // Local-first read path (see AGENTS.md "Local-First Architecture") — the
+  // local DB is the source of truth; Firestore writes still go through
+  // FirestoreService for real-time delivery, and the sync listener echoes
+  // them back into this DAO, which is what this screen actually reads from.
+  final _messageDao = MessageDao(AppDatabase.instance());
+  // Sender's own outgoing-message receipt icon state — 'pending'|'sent'|
+  // 'delivered', kept separate from the Message model itself (see
+  // converters.dart's messageRowFromModel/messageFromRow split).
+  final Map<String, String> _deliveryStatus = {};
+
   // Scroll
   final _itemScrollController = ItemScrollController();
   final _itemPositionsListener = ItemPositionsListener.create();
   bool _showScrollToBottom = false;
 
-  // Pagination state
+  // Pagination state — a plain sentAt epoch-millis cursor now, instead of a
+  // Firestore DocumentSnapshot, since pages come from the local DB.
   List<Message> _messages = [];
-  DocumentSnapshot? _pageCursor;
+  int? _pageCursor;
   bool _isLoadingMore = false;
   bool _hasMore = true;
   bool _initialLoading = true;
-  StreamSubscription<List<Message>>? _streamSub;
+  StreamSubscription<List<MessageRow>>? _streamSub;
 
   // Highlight
   String? _highlightedId;
@@ -187,6 +200,20 @@ class ChatScreenState extends State<ChatScreen> {
   String get _myUid => FirebaseAuth.instance.currentUser?.uid ?? '';
   bool get isSearchActive => _searchActive;
 
+  /// Clears any decryption results cached before the E2EE private key was
+  /// available (e.g. messages that arrived/were built while a fresh install
+  /// was still waiting on the user to enter their PIN in the restore
+  /// dialog). Without this, a failed decryption gets cached in
+  /// [_decryptedTextCache] permanently — [_getOrDecryptText] never retries
+  /// anything already in that map — so nothing re-decrypts until the whole
+  /// screen is torn down and rebuilt (closing/reopening the app). Call this
+  /// right after keys become available (see main_shell.dart's E2EE dialogs).
+  void resetDecryptionState() {
+    _decryptedTextCache.clear();
+    _sharedKey = null;
+    if (mounted) setState(() {});
+  }
+
   // ── Lifecycle ────────────────────────────────────────────────────────────────
 
   @override
@@ -227,24 +254,64 @@ class ChatScreenState extends State<ChatScreen> {
   // ── Data loading ─────────────────────────────────────────────────────────────
 
   Future<void> _loadInitialMessages() async {
-    final result = await _firestore.fetchMessagePage(_coupleId, 50);
-    if (!mounted) return;
-    setState(() {
-      _messages = result.messages;
-      _pageCursor = result.cursor;
-      _hasMore = result.messages.length == 50;
-      _initialLoading = false;
-    });
-    if (widget.isActive) {
-      _firestore.markMessagesRead(_coupleId, _myUid);
+    try {
+      final rows = await _messageDao.fetchPage(50);
+      if (!mounted) return;
+      final messages = _applyRows(rows);
+      setState(() {
+        _messages = messages;
+        _pageCursor = rows.isEmpty ? null : rows.last.sentAt;
+        _hasMore = rows.length == 50;
+        _initialLoading = false;
+      });
+      if (widget.isActive) {
+        _firestore.markMessagesRead(_coupleId, _myUid);
+      }
+    } catch (e) {
+      LogService.log('Chat: initial local DB load failed: $e');
+      // Still flip off the loading spinner — an empty list + retry via the
+      // live stream below is better than being stuck loading forever.
+      if (mounted) setState(() => _initialLoading = false);
     }
 
-    // Real-time stream for new messages + live updates (reactions, readBy)
-    _streamSub = _firestore.messageStream(_coupleId).listen(_onStreamUpdate);
+    // Live local-DB window — re-emits whenever the sync listener (partner's
+    // messages) or our own optimistic send-time insert changes the top 50
+    // rows. Reactions/readBy updates arrive the same way, as a full re-emit
+    // of the row, matching what messageStream() used to deliver directly
+    // from Firestore. Set up regardless of whether the initial fetch above
+    // succeeded, so a transient failure there doesn't also kill live
+    // updates for the rest of the session.
+    _streamSub = _messageDao.watchLatest(50).listen(
+      _onStreamUpdate,
+      onError: (e) => LogService.log('Chat: watchLatest stream error: $e'),
+    );
   }
 
-  void _onStreamUpdate(List<Message> streamMessages) {
+  /// Updates the delivery-status map from freshly-loaded rows and returns
+  /// the equivalent Message list — shared by the initial load and every
+  /// page-fetch, so the two decoding paths can't drift apart.
+  ///
+  /// Converts row-by-row rather than via a single .map().toList() — a
+  /// single row failing to convert (a bad/unexpected field shape) must not
+  /// take down the entire message list along with it, and needs to be
+  /// logged rather than silently disappearing as an uncaught exception
+  /// inside a stream listener callback.
+  List<Message> _applyRows(List<MessageRow> rows) {
+    final result = <Message>[];
+    for (final row in rows) {
+      _deliveryStatus[row.id] = row.deliveryStatus;
+      try {
+        result.add(messageFromRow(row));
+      } catch (e) {
+        LogService.log('Chat: failed to convert local DB row ${row.id} to Message: $e');
+      }
+    }
+    return result;
+  }
+
+  void _onStreamUpdate(List<MessageRow> streamRows) {
     if (!mounted) return;
+    final streamMessages = _applyRows(streamRows);
 
     final existingIds = {for (final m in _messages) m.id};
     final newPartnerMessages = streamMessages
@@ -303,19 +370,16 @@ class ChatScreenState extends State<ChatScreen> {
   Future<void> _loadMoreMessages() async {
     if (_isLoadingMore || !_hasMore || _pageCursor == null) return;
     setState(() => _isLoadingMore = true);
-    final result = await _firestore.fetchMessagePage(
-      _coupleId,
-      50,
-      startAfter: _pageCursor,
-    );
+    final rows = await _messageDao.fetchPage(50, beforeSentAtMillis: _pageCursor);
     if (!mounted) return;
+    final pageMessages = _applyRows(rows);
     setState(() {
       final existingIds = {for (final m in _messages) m.id};
       final newOnes =
-          result.messages.where((m) => !existingIds.contains(m.id)).toList();
+          pageMessages.where((m) => !existingIds.contains(m.id)).toList();
       _messages = [..._messages, ...newOnes];
-      _pageCursor = result.cursor;
-      _hasMore = result.messages.length == 50;
+      _pageCursor = rows.isEmpty ? _pageCursor : rows.last.sentAt;
+      _hasMore = rows.length == 50;
       _isLoadingMore = false;
     });
   }
@@ -383,18 +447,30 @@ class ChatScreenState extends State<ChatScreen> {
       LogService.log('Crypto Error: Encryption failed during send, falling back to plaintext: $e');
     }
 
+    final message = Message(
+      id: const Uuid().v4(),
+      senderId: _myUid,
+      text: textToSend,
+      type: MessageType.text,
+      sentAt: DateTime.now(),
+      readBy: [_myUid],
+      replyToId: reply?.id,
+      replyToText: replyTextToSend,
+    );
+
+    // Optimistic local insert — see AGENTS.md's message delivery status
+    // design. The message doesn't exist anywhere yet, so this is the one
+    // place that writes directly to the local DB instead of waiting for
+    // Firestore's listener to echo it back; that echo (with the same id,
+    // since sendMessage() now writes to .doc(message.id)) will overwrite
+    // this row once the send round-trips, flipping deliveryStatus from
+    // 'pending' to 'sent' via Firestore's hasPendingWrites metadata.
+    await _messageDao.upsertBatch(
+        [messageRowFromModel(message, deliveryStatus: 'pending')]);
+
     await _firestore.sendMessage(
       _coupleId,
-      Message(
-        id: const Uuid().v4(),
-        senderId: _myUid,
-        text: textToSend,
-        type: MessageType.text,
-        sentAt: DateTime.now(),
-        readBy: [_myUid],
-        replyToId: reply?.id,
-        replyToText: replyTextToSend,
-      ),
+      message,
       senderName: _auth.myName,
     );
     final myKey = _auth.isRay ? 'ray' : 'aproo';
@@ -473,18 +549,25 @@ class ChatScreenState extends State<ChatScreen> {
             final encryptedTextMap = await CryptoService().encryptText('[Voice Message]', sharedKey);
             final textToSend = jsonEncode(encryptedTextMap);
 
+            final voiceMessage = Message(
+              id: const Uuid().v4(),
+              senderId: _myUid,
+              text: textToSend,
+              type: MessageType.voice,
+              audioUrl: encryptedVoiceJson,
+              duration: _recordingDuration,
+              sentAt: DateTime.now(),
+              readBy: [_myUid],
+            );
+
+            // Same optimistic-insert reasoning as the text send path above.
+            await _messageDao.upsertBatch([
+              messageRowFromModel(voiceMessage, deliveryStatus: 'pending')
+            ]);
+
             await _firestore.sendMessage(
               _coupleId,
-              Message(
-                id: const Uuid().v4(),
-                senderId: _myUid,
-                text: textToSend,
-                type: MessageType.voice,
-                audioUrl: encryptedVoiceJson,
-                duration: _recordingDuration,
-                sentAt: DateTime.now(),
-                readBy: [_myUid],
-              ),
+              voiceMessage,
               senderName: _auth.myName,
             );
 
@@ -579,7 +662,29 @@ class ChatScreenState extends State<ChatScreen> {
     if (_allMessages == null && !_loadingAllMessages) {
       LogService.log('Fetching ALL messages for search index');
       setState(() => _loadingAllMessages = true);
-      final all = await _firestore.getAllMessages(_coupleId);
+
+      final rows = await _messageDao.fetchAll();
+      // Safety net: if the local DB's full-history backfill (see
+      // local_sync_service.dart) hasn't actually finished — e.g. app was
+      // killed right after a fresh sign-in — local count can silently be
+      // lower than Firestore's, which would make search miss results with
+      // no visible error. Fall back to the direct Firestore read in that
+      // case rather than trust an incomplete local copy.
+      List<Message> all;
+      try {
+        final liveCount = await _firestore.countMessages(_coupleId);
+        if (rows.length < liveCount) {
+          LogService.log(
+              'Search: local DB has ${rows.length} messages but Firestore has $liveCount — falling back to direct fetch');
+          all = await _firestore.getAllMessages(_coupleId);
+        } else {
+          all = _applyRows(rows);
+        }
+      } catch (e) {
+        LogService.log('Search: live count check failed, using local DB as-is: $e');
+        all = _applyRows(rows);
+      }
+
       if (mounted) {
         setState(() {
           _allMessages = all;
@@ -687,6 +792,13 @@ class ChatScreenState extends State<ChatScreen> {
                       child: IgnorePointer(
                         ignoring: !_showScrollToBottom,
                         child: FloatingActionButton.small(
+                          // heroTag: null — see todo_screen.dart's FAB for why:
+                          // main_shell.dart's IndexedStack keeps this screen and
+                          // todo_screen.dart mounted simultaneously, and any FAB
+                          // left on the default tag collides even with a single
+                          // instance, due to Flutter's IndexedStack/Hero
+                          // tree-traversal quirk.
+                          heroTag: null,
                           onPressed: _scrollToBottom,
                           backgroundColor: Colors.white,
                           foregroundColor: AppTheme.primary,
@@ -840,6 +952,7 @@ class ChatScreenState extends State<ChatScreen> {
               replyToDisplayText: _getOrDecryptReplyText(msg),
               isMe: msg.senderId == _myUid,
               showReceipt: i == 0 && msg.senderId == _myUid,
+              deliveryStatus: _deliveryStatus[msg.id] ?? 'sent',
               myUid: _myUid,
               onLongPress: () => _showReactionPicker(msg),
               onReaction: (emoji) => _toggleReaction(msg.id, emoji),
@@ -1171,6 +1284,10 @@ class _MessageBubble extends StatelessWidget {
   final String? replyToDisplayText;
   final bool isMe;
   final bool showReceipt;
+  /// 'pending' | 'sent' | 'delivered' — see AGENTS.md's message delivery
+  /// status design. Only meaningful when isMe/showReceipt; the existing
+  /// readBy-based "read" state below takes priority once true.
+  final String deliveryStatus;
   final String myUid;
   final VoidCallback onLongPress;
   final void Function(String emoji) onReaction;
@@ -1183,6 +1300,7 @@ class _MessageBubble extends StatelessWidget {
     this.replyToDisplayText,
     required this.isMe,
     required this.showReceipt,
+    this.deliveryStatus = 'sent',
     required this.myUid,
     required this.onLongPress,
     required this.onReaction,
@@ -1282,8 +1400,14 @@ class _MessageBubble extends StatelessWidget {
                       if (isMe && showReceipt) ...[
                         const SizedBox(width: 4),
                         Icon(
-                          isRead ? Icons.done_all_rounded : Icons.done_rounded,
-                          size: 12,
+                          isRead
+                              ? Icons.done_all_rounded
+                              : deliveryStatus == 'pending'
+                                  ? Icons.access_time_rounded
+                                  : deliveryStatus == 'delivered'
+                                      ? Icons.done_all_rounded
+                                      : Icons.done_rounded,
+                          size: isRead || deliveryStatus != 'pending' ? 12 : 11,
                           color: isRead ? const Color(0xFFE8715A) : Colors.white60,
                         ),
                       ],
@@ -1550,8 +1674,12 @@ class _MessageBubble extends StatelessWidget {
                                   Icon(
                                     isRead
                                         ? Icons.done_all_rounded
-                                        : Icons.done_rounded,
-                                    size: 12,
+                                        : deliveryStatus == 'pending'
+                                            ? Icons.access_time_rounded
+                                            : deliveryStatus == 'delivered'
+                                                ? Icons.done_all_rounded
+                                                : Icons.done_rounded,
+                                    size: isRead || deliveryStatus != 'pending' ? 12 : 11,
                                     color: isRead
                                         ? (isEmojiOnly ? AppTheme.primary : Colors.white.withValues(alpha: 0.85))
                                         : (isEmojiOnly ? AppTheme.textMuted : Colors.white.withValues(alpha: 0.45)),

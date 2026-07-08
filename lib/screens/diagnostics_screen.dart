@@ -6,6 +6,9 @@ import '../services/crypto_service.dart';
 import '../services/google_drive_service.dart';
 import '../services/backup_service.dart';
 import '../services/foreground_backup_scheduler.dart';
+import '../services/firestore_service.dart';
+import '../services/local_sync_service.dart';
+import '../config/env_config.dart';
 import '../theme/app_theme.dart';
 
 class DiagnosticsScreen extends StatefulWidget {
@@ -75,20 +78,34 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
             subtitle: 'Exercises the real 24h due-check used on app open/resume',
             onTap: _runBackupIfDue,
           ),
+          const SizedBox(height: 24),
+          _buildSectionHeader('Local DB (Phase 1 — shadow mode)'),
+          _buildTile(
+            icon: Icons.storage_rounded,
+            title: 'Inspect Local DB',
+            subtitle: 'Row counts vs. live Firestore — verifies the sync engine before any screen reads from it',
+            onTap: _inspectLocalDb,
+          ),
         ],
       ),
     );
   }
 
   Widget _buildLoggingToggle() {
+    // Background color must live on the Material (not an outer DecoratedBox)
+    // so SwitchListTile's ink splashes paint on top of it instead of being
+    // hidden underneath — see Flutter's own "ListTile ink splashes may be
+    // invisible" warning this fixes.
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: AppTheme.surface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppTheme.divider),
       ),
-      child: SwitchListTile(
+      clipBehavior: Clip.antiAlias,
+      child: Material(
+        color: AppTheme.surface,
+        child: SwitchListTile(
         value: _loggingEnabled,
         onChanged: (val) async {
           await LogService.setEnabled(val);
@@ -118,6 +135,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
         activeThumbColor: AppTheme.primary,
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        ),
       ),
     );
   }
@@ -365,6 +383,77 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
     );
   }
 
+  Future<void> _inspectLocalDb() async {
+    LogService.log('Diagnostics: inspecting local DB state');
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator(color: AppTheme.primary)),
+    );
+
+    final sync = LocalSyncService();
+    final firestore = FirestoreService();
+    const coupleId = EnvConfig.coupleId;
+
+    final localMessages = await sync.messageDao.count();
+    final localTodos = await sync.todoDao.count();
+    final localComments = await sync.commentDao.count();
+    final localStickyNotes = await sync.stickyNoteDao.count();
+
+    int? liveMessages, liveTodos, liveComments, liveStickyNotes;
+    String? error;
+    try {
+      liveMessages = await firestore.countMessages(coupleId);
+      liveTodos = await firestore.countTodos(coupleId);
+      liveComments = await firestore.countComments();
+      liveStickyNotes = await firestore.countStickyNotes(coupleId);
+    } catch (e) {
+      error = 'Failed to fetch live Firestore counts: $e';
+    }
+
+    if (mounted) Navigator.pop(context); // dismiss loader
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: Text('Local DB State', style: GoogleFonts.playfairDisplay(fontWeight: FontWeight.bold)),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Counts (local DB vs. live Firestore)', style: GoogleFonts.dmSans(fontWeight: FontWeight.w700)),
+              Text('Messages: $localMessages vs ${liveMessages ?? "—"}'),
+              Text('Todos: $localTodos vs ${liveTodos ?? "—"}'),
+              Text('Comments: $localComments vs ${liveComments ?? "—"}'),
+              Text('Sticky notes: $localStickyNotes vs ${liveStickyNotes ?? "—"}'),
+              const SizedBox(height: 12),
+              Text(
+                'Messages will legitimately run slightly behind live count '
+                'right after a fresh sign-in, until the one-time full-history '
+                'backfill finishes — re-check after a few seconds if it '
+                'looks low.',
+                style: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
+              ),
+              if (error != null) ...[
+                const SizedBox(height: 12),
+                Text(error, style: const TextStyle(fontSize: 12, color: Colors.red)),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildCheckrow(String label, bool isOk) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -438,14 +527,18 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
     required VoidCallback onTap,
     Color? textColor,
   }) {
+    // Same fix as _buildLoggingToggle() — background belongs on Material,
+    // not an outer DecoratedBox, so ListTile's ink splash renders visibly.
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: AppTheme.surface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppTheme.divider),
       ),
-      child: ListTile(
+      clipBehavior: Clip.antiAlias,
+      child: Material(
+        color: AppTheme.surface,
+        child: ListTile(
         onTap: onTap,
         leading: Container(
           padding: const EdgeInsets.all(8),
@@ -469,6 +562,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
         ),
         trailing: const Icon(Icons.chevron_right_rounded,
             color: AppTheme.textMuted, size: 20),
+        ),
       ),
     );
   }

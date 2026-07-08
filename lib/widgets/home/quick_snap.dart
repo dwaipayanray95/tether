@@ -794,6 +794,11 @@ class _QuickSnapState extends State<QuickSnap> {
                   bottom: 8,
                   right: 8,
                   child: FloatingActionButton.small(
+                    // heroTag: null — main_shell.dart's IndexedStack keeps
+                    // Home/Chat/Todo all mounted simultaneously; any FAB left
+                    // on the default tag collides across screens even with a
+                    // single instance each (see todo_screen.dart's FAB).
+                    heroTag: null,
                     onPressed: _isUploading ? null : _showImageSourceSelector,
                     backgroundColor: AppTheme.primary,
                     foregroundColor: Colors.white,

@@ -167,6 +167,36 @@ class LocalStorageService {
     return snaps.where((s) => s.driveFileId == null).toList();
   }
 
+  /// Ids already present locally, by their `snap_{id}.png` filename — used
+  /// to figure out which Drive snap files are missing locally (e.g. after a
+  /// fresh install, since local storage is wiped on reinstall but Drive
+  /// isn't).
+  Future<Set<String>> localSnapIds() async {
+    final snaps = await loadSnaps();
+    return snaps.map((s) => s.id).toSet();
+  }
+
+  /// Saves a snap recovered from Drive — same as saveSnap() but keeps the
+  /// Drive file's own id-derived filename instead of minting a new one from
+  /// the current time, so re-running this is idempotent and the restored
+  /// snap is immediately marked as already uploaded (no redundant re-upload
+  /// on the next backup run).
+  Future<void> saveRecoveredSnap(
+      String id, Uint8List imageBytes, String driveFileId) async {
+    final dir = await _snapsDir;
+    final imagePath = '${dir.path}/snap_$id.png';
+    final jsonPath = '${dir.path}/snap_$id.json';
+    final date = DateTime.fromMillisecondsSinceEpoch(int.tryParse(id) ?? 0);
+
+    await File(imagePath).writeAsBytes(imageBytes);
+    // Caption isn't recoverable — uploadSnap() only ever uploads the raw
+    // PNG bytes, never the caption, so a snap restored from Drive alone
+    // necessarily comes back with a blank caption.
+    final snap = LocalSnap(
+        id: id, caption: '', date: date, driveFileId: driveFileId, imagePath: imagePath);
+    await File(jsonPath).writeAsString(jsonEncode(snap.toJson()));
+  }
+
   Future<List<String>> pendingDeletionDriveFileIds() async {
     try {
       final file = await _pendingDeletionsFile;

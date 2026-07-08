@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import '../../services/auth_service.dart';
 import '../../services/firestore_service.dart';
 import '../../services/crypto_service.dart';
+import '../../local_db/app_database.dart';
+import '../../local_db/daos/sticky_note_dao.dart';
 import '../../theme/app_theme.dart';
 
 // ── Pastel colours shared between board and archive ───────────────────────────
@@ -271,7 +272,8 @@ class StickyBoard extends StatefulWidget {
 class StickyBoardState extends State<StickyBoard> {
   final _auth = AuthService();
   final _firestore = FirestoreService();
-  late final Stream<QuerySnapshot<Map<String, dynamic>>> _stream;
+  final _stickyNoteDao = StickyNoteDao(AppDatabase.instance());
+  late final Stream<List<StickyNote>> _stream;
 
   // E2EE decryption cache
   final Map<String, String> _decryptedTextCache = {};
@@ -301,7 +303,7 @@ class StickyBoardState extends State<StickyBoard> {
   @override
   void initState() {
     super.initState();
-    _stream = _firestore.stickyNotesStream(coupleId);
+    _stream = _stickyNoteDao.watchAll();
   }
 
   // ── Add Note ──────────────────────────────────────────────────────────────
@@ -501,8 +503,8 @@ class StickyBoardState extends State<StickyBoard> {
         initialChildSize: 0.75,
         maxChildSize: 0.95,
         builder: (context, scrollCtrl) =>
-            StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-          stream: _firestore.stickyNotesStream(coupleId),
+            StreamBuilder<List<StickyNote>>(
+          stream: _stickyNoteDao.watchAll(),
           builder: (context, snapshot) {
             if (snapshot.hasError) {
               return Center(
@@ -515,9 +517,7 @@ class StickyBoardState extends State<StickyBoard> {
             if (!snapshot.hasData) {
               return const Center(child: CircularProgressIndicator());
             }
-            final archived = snapshot.data!.docs.where((d) {
-              return d.data()['isArchived'] == true;
-            }).toList();
+            final archived = snapshot.data!.where((n) => n.isArchived).toList();
 
             return Column(
               children: [
@@ -581,12 +581,11 @@ class StickyBoardState extends State<StickyBoard> {
                           ),
                           itemCount: archived.length,
                           itemBuilder: (context, index) {
-                            final doc = archived[index];
-                            final id = doc.id;
-                            final text = doc['text'] as String? ?? '';
-                            final colorIdx = doc['colorIndex'] as int? ?? 0;
-                            final author =
-                                doc['createdByName'] as String? ?? 'Partner';
+                            final note = archived[index];
+                            final id = note.id;
+                            final text = note.textContent;
+                            final colorIdx = note.colorIndex;
+                            final author = note.createdByName;
                             final paperColor = stickyPastels[
                                 colorIdx % stickyPastels.length];
 
@@ -758,7 +757,7 @@ class StickyBoardState extends State<StickyBoard> {
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+    return StreamBuilder<List<StickyNote>>(
       stream: _stream,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
@@ -779,27 +778,25 @@ class StickyBoardState extends State<StickyBoard> {
             child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
           );
         }
-        final docs = (snapshot.data?.docs ?? []).where((d) {
-          return d.data()['isArchived'] != true;
-        }).toList();
+        final notes = (snapshot.data ?? []).where((n) => !n.isArchived).toList();
 
         return SizedBox(
           height: 155,
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(vertical: 4),
-            itemCount: docs.length + 1,
+            itemCount: notes.length + 1,
             itemBuilder: (context, index) {
-              if (index == docs.length) {
+              if (index == notes.length) {
                 return _buildAddNoteTile();
               }
-              final doc = docs[index];
-              final id = doc.id;
-              final text = doc['text'] as String? ?? '';
-              final colorIdx = doc['colorIndex'] as int? ?? 0;
-              final author = doc['createdByName'] as String? ?? 'Partner';
-              final authorUid = doc['createdBy'] as String? ?? '';
-              final date = (doc['createdAt'] as Timestamp?)?.toDate();
+              final note = notes[index];
+              final id = note.id;
+              final text = note.textContent;
+              final colorIdx = note.colorIndex;
+              final author = note.createdByName;
+              final authorUid = note.createdBy;
+              final date = DateTime.fromMillisecondsSinceEpoch(note.createdAt, isUtc: true);
 
               return StickyNoteTile(
                 id: id,

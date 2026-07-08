@@ -195,6 +195,42 @@ class GoogleDriveService {
     }
   }
 
+  /// Lists every file in the Drive Snaps folder — used to recover snaps on
+  /// a fresh install (local storage is wiped on reinstall, Drive isn't).
+  /// Returns (fileId, fileName) pairs; fileName is expected to be
+  /// `snap_{id}.png`, matching uploadSnap()'s naming.
+  Future<List<({String id, String name})>> listSnapFiles() async {
+    final token = await _getAccessToken();
+    final folderId = await _getSnapsFolderId(token);
+    final response = await _dio.get(
+      'https://www.googleapis.com/drive/v3/files',
+      queryParameters: {
+        'q': "'$folderId' in parents and trashed = false",
+        'fields': 'files(id, name)',
+      },
+      options: Options(headers: {'Authorization': 'Bearer $token'}),
+    );
+    final files = response.data['files'] as List? ?? [];
+    return files
+        .map((f) => (id: f['id'] as String, name: f['name'] as String))
+        .toList();
+  }
+
+  /// Downloads raw bytes for an arbitrary file by id — unlike
+  /// downloadBytesByName(), this doesn't assume the file lives directly in
+  /// the Tether folder (Snaps live in the Tether/snaps subfolder).
+  Future<Uint8List?> downloadFileBytes(String fileId) async {
+    final token = await _getAccessToken();
+    final response = await _dio.get<List<int>>(
+      'https://www.googleapis.com/drive/v3/files/$fileId?alt=media',
+      options: Options(
+        headers: {'Authorization': 'Bearer $token'},
+        responseType: ResponseType.bytes,
+      ),
+    );
+    return Uint8List.fromList(response.data ?? []);
+  }
+
   Future<bool> deleteFile(String fileId) async {
     try {
       LogService.log('Google Drive: Deleting file $fileId');
@@ -224,6 +260,34 @@ class GoogleDriveService {
     final token = await _getAccessToken();
     final parentId = await _getOrCreateFolder(token, 'Tether');
     return _findFileIdInFolder(token, parentId, fileName);
+  }
+
+  /// Looks up a file's last-modified time and size without downloading it —
+  /// used to reconcile the local backup cursor with what's actually on
+  /// Drive (e.g. a fresh install has no local cursor at all, even though a
+  /// backup from a previous install may already exist).
+  Future<({DateTime modifiedTime, int sizeBytes})?> getFileMetadata(
+      String fileName) async {
+    final token = await _getAccessToken();
+    final parentId = await _getOrCreateFolder(token, 'Tether');
+    final response = await _dio.get(
+      'https://www.googleapis.com/drive/v3/files',
+      queryParameters: {
+        'q': "name = '$fileName' and '$parentId' in parents and trashed = false",
+        'fields': 'files(modifiedTime, size)',
+      },
+      options: Options(headers: {'Authorization': 'Bearer $token'}),
+    );
+    final files = response.data['files'] as List?;
+    if (files == null || files.isEmpty) return null;
+    final file = files.first as Map<String, dynamic>;
+    final modifiedTime = file['modifiedTime'] as String?;
+    final size = file['size'] as String?;
+    if (modifiedTime == null) return null;
+    return (
+      modifiedTime: DateTime.parse(modifiedTime),
+      sizeBytes: int.tryParse(size ?? '') ?? 0,
+    );
   }
 
   Future<String?> _findFileIdInFolder(
