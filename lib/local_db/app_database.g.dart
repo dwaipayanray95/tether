@@ -2523,6 +2523,34 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $TodosTable todos = $TodosTable(this);
   late final $TodoCommentsTable todoComments = $TodoCommentsTable(this);
   late final $StickyNotesTable stickyNotes = $StickyNotesTable(this);
+  late final Index messagesSentAt = Index(
+    'messages_sent_at',
+    'CREATE INDEX messages_sent_at ON messages (sent_at)',
+  );
+  late final Index messagesUpdatedAt = Index(
+    'messages_updated_at',
+    'CREATE INDEX messages_updated_at ON messages (updated_at)',
+  );
+  late final Index todosCreatedAt = Index(
+    'todos_created_at',
+    'CREATE INDEX todos_created_at ON todos (created_at)',
+  );
+  late final Index todosUpdatedAt = Index(
+    'todos_updated_at',
+    'CREATE INDEX todos_updated_at ON todos (updated_at)',
+  );
+  late final Index commentsTodoId = Index(
+    'comments_todo_id',
+    'CREATE INDEX comments_todo_id ON todo_comments (todo_id)',
+  );
+  late final Index stickyNotesCreatedAt = Index(
+    'sticky_notes_created_at',
+    'CREATE INDEX sticky_notes_created_at ON sticky_notes (created_at)',
+  );
+  late final Index stickyNotesUpdatedAt = Index(
+    'sticky_notes_updated_at',
+    'CREATE INDEX sticky_notes_updated_at ON sticky_notes (updated_at)',
+  );
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -2532,6 +2560,13 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     todos,
     todoComments,
     stickyNotes,
+    messagesSentAt,
+    messagesUpdatedAt,
+    todosCreatedAt,
+    todosUpdatedAt,
+    commentsTodoId,
+    stickyNotesCreatedAt,
+    stickyNotesUpdatedAt,
   ];
 }
 

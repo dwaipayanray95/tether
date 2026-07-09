@@ -11,7 +11,14 @@ import 'package:drift/drift.dart';
 /// @DataClassName renames the generated row class to MessageRow — Drift's
 /// default (singularizing "Messages" to "Message") would collide with the
 /// app's own Message model in message_model.dart.
+///
+/// Indexed on sentAt (MessageDao.fetchPage/watchLatest/fetchAll all sort on
+/// it — without an index this is a full table scan on every scroll-
+/// triggered page load) and updatedAt (fetchSince's sync-delta filter, used
+/// by both LocalSyncService's backfill cursor and the backup pipeline).
 @DataClassName('MessageRow')
+@TableIndex(name: 'messages_sent_at', columns: {#sentAt})
+@TableIndex(name: 'messages_updated_at', columns: {#updatedAt})
 class Messages extends Table {
   TextColumn get id => text()();
   TextColumn get senderId => text()();

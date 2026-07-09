@@ -49,14 +49,25 @@ class TodoDao {
   Future<int> count() async => (await _db.select(_db.todos).get()).length;
 
   /// Firestore-delta-shaped maps for backup_service.dart's runBackup() —
-  /// same semantics as firestore_service.dart's fetchTodosSince().
+  /// same semantics as firestore_service.dart's fetchTodosSince(). Converts
+  /// row-by-row rather than a single .map().toList() — this feeds the
+  /// backup pipeline, so one malformed row must not abort the entire
+  /// backup run for every todo (same reasoning as watchAllAsModels() above).
   Future<List<Map<String, dynamic>>> fetchSince(DateTime? since) async {
     final query = _db.select(_db.todos);
     if (since != null) {
       query.where((t) => t.updatedAt.isBiggerThanValue(since.toUtc().millisecondsSinceEpoch));
     }
     final rows = await query.get();
-    return rows.map(todoMapFromRow).toList();
+    final result = <Map<String, dynamic>>[];
+    for (final row in rows) {
+      try {
+        result.add(todoMapFromRow(row));
+      } catch (e) {
+        LogService.log('TodoDao: failed to convert row ${row.id} for backup: $e');
+      }
+    }
+    return result;
   }
 
   Future<void> upsertBatch(List<TodosCompanion> rows) async {
@@ -68,4 +79,12 @@ class TodoDao {
 
   Future<void> deleteById(String id) =>
       (_db.delete(_db.todos)..where((t) => t.id.equals(id))).go();
+
+  /// Single statement for N deletes instead of N sequential awaited
+  /// statements — used by LocalSyncService when a snapshot reports several
+  /// removed docs in one batch (e.g. clearing/archiving multiple todos).
+  Future<void> deleteByIds(List<String> ids) async {
+    if (ids.isEmpty) return;
+    await (_db.delete(_db.todos)..where((t) => t.id.isIn(ids))).go();
+  }
 }

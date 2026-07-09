@@ -5,6 +5,11 @@ import 'package:drift/drift.dart';
 /// dedicated model class for sticky notes today (the screen reads raw
 /// QuerySnapshot data directly), so this table is the first place that shape
 /// gets named explicitly.
+///
+/// Indexed on createdAt (watchAll's sort column) and updatedAt (fetchSince's
+/// sync-delta filter).
+@TableIndex(name: 'sticky_notes_created_at', columns: {#createdAt})
+@TableIndex(name: 'sticky_notes_updated_at', columns: {#updatedAt})
 class StickyNotes extends Table {
   TextColumn get id => text()();
   TextColumn get textContent => text().named('text')();

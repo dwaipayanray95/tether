@@ -35,22 +35,27 @@ const _reactionEmojis = [
 
 // ── Emoji Helpers ────────────────────────────────────────────────────────────
 
+// Compiled once at load time instead of on every _isEmojiOnly/_countEmojis
+// call — these run on every bubble on every rebuild (including rebuilds
+// triggered by unrelated messages' reactions/read-receipts, since the whole
+// visible list rebuilds together), so recompiling the same pattern from its
+// source string on every call was pure waste.
+final RegExp _emojiOnlyRegex = RegExp(
+  r'^[\u{1f300}-\u{1f5ff}\u{1f900}-\u{1f9ff}\u{1f600}-\u{1f64f}\u{1f680}-\u{1f6ff}\u{2600}-\u{26ff}\u{2700}-\u{27bf}\u{1f1e6}-\u{1f1ff}\u{1f191}-\u{1f251}\u{1f004}\u{1f0cf}\u{1f170}-\u{1f171}\u{1f17e}-\u{1f17f}\u{1f18e}\u{3030}\u{2b50}\u{2b55}\u{2934}-\u{2935}\u{2b05}-\u{2b07}\u{2b1b}-\u{2b1c}\u{3297}\u{3299}\u{303d}\u{00a9}\u{00ae}\u{2122}\u{23f3}\u{24c2}\u{23e9}-\u{23ef}\u{25b6}\u{23f8}-\u{23fa}\u{200d}\u{fe0f}\s]+$',
+  unicode: true,
+);
+
+final RegExp _emojiCountRegex = RegExp(
+  r'[\u{1f300}-\u{1f5ff}\u{1f900}-\u{1f9ff}\u{1f600}-\u{1f64f}\u{1f680}-\u{1f6ff}\u{2600}-\u{26ff}\u{2700}-\u{27bf}\u{1f1e6}-\u{1f1ff}\u{1f191}-\u{1f251}\u{1f004}\u{1f0cf}\u{1f170}-\u{1f171}\u{1f17e}-\u{1f17f}\u{1f18e}\u{3030}\u{2b50}\u{2b55}\u{2934}-\u{2935}\u{2b05}-\u{2b07}\u{2b1b}-\u{2b1c}\u{3297}\u{3299}\u{303d}\u{00a9}\u{00ae}\u{2122}\u{23f3}\u{24c2}\u{23e9}-\u{23ef}\u{25b6}\u{23f8}-\u{23fa}\u{200d}\u{fe0f}]',
+  unicode: true,
+);
+
 bool _isEmojiOnly(String text) {
   if (text.trim().isEmpty) return false;
-  final regex = RegExp(
-    r'^[\u{1f300}-\u{1f5ff}\u{1f900}-\u{1f9ff}\u{1f600}-\u{1f64f}\u{1f680}-\u{1f6ff}\u{2600}-\u{26ff}\u{2700}-\u{27bf}\u{1f1e6}-\u{1f1ff}\u{1f191}-\u{1f251}\u{1f004}\u{1f0cf}\u{1f170}-\u{1f171}\u{1f17e}-\u{1f17f}\u{1f18e}\u{3030}\u{2b50}\u{2b55}\u{2934}-\u{2935}\u{2b05}-\u{2b07}\u{2b1b}-\u{2b1c}\u{3297}\u{3299}\u{303d}\u{00a9}\u{00ae}\u{2122}\u{23f3}\u{24c2}\u{23e9}-\u{23ef}\u{25b6}\u{23f8}-\u{23fa}\u{200d}\u{fe0f}\s]+$',
-    unicode: true,
-  );
-  return regex.hasMatch(text.trim());
+  return _emojiOnlyRegex.hasMatch(text.trim());
 }
 
-int _countEmojis(String text) {
-  final regex = RegExp(
-    r'[\u{1f300}-\u{1f5ff}\u{1f900}-\u{1f9ff}\u{1f600}-\u{1f64f}\u{1f680}-\u{1f6ff}\u{2600}-\u{26ff}\u{2700}-\u{27bf}\u{1f1e6}-\u{1f1ff}\u{1f191}-\u{1f251}\u{1f004}\u{1f0cf}\u{1f170}-\u{1f171}\u{1f17e}-\u{1f17f}\u{1f18e}\u{3030}\u{2b50}\u{2b55}\u{2934}-\u{2935}\u{2b05}-\u{2b07}\u{2b1b}-\u{2b1c}\u{3297}\u{3299}\u{303d}\u{00a9}\u{00ae}\u{2122}\u{23f3}\u{24c2}\u{23e9}-\u{23ef}\u{25b6}\u{23f8}-\u{23fa}\u{200d}\u{fe0f}]',
-    unicode: true,
-  );
-  return regex.allMatches(text).length;
-}
+int _countEmojis(String text) => _emojiCountRegex.allMatches(text).length;
 
 class ChatScreen extends StatefulWidget {
   final bool isActive;
@@ -84,10 +89,12 @@ class ChatScreenState extends State<ChatScreen> {
   final _itemPositionsListener = ItemPositionsListener.create();
   bool _showScrollToBottom = false;
 
-  // Pagination state — a plain sentAt epoch-millis cursor now, instead of a
-  // Firestore DocumentSnapshot, since pages come from the local DB.
+  // Pagination state — a compound (sentAt, id) cursor now, instead of a
+  // Firestore DocumentSnapshot, since pages come from the local DB. Both
+  // fields are needed: sentAt alone isn't unique (see MessageDao.fetchPage).
   List<Message> _messages = [];
   int? _pageCursor;
+  String? _pageCursorId;
   bool _isLoadingMore = false;
   bool _hasMore = true;
   bool _initialLoading = true;
@@ -107,9 +114,28 @@ class ChatScreenState extends State<ChatScreen> {
   bool _isSendingVoice = false;
   bool _isStoppingRecording = false;
 
-  // E2EE decryption cache
+  // E2EE decryption cache — bounded FIFO eviction. Before the local-first
+  // migration, chat only ever loaded the newest ~50 messages, so this map
+  // was implicitly small. Local-DB-backed search now loads full history
+  // (see _activateSearch/_allMessages below), so without a cap this would
+  // grow to hold every message a user has ever searched/scrolled through,
+  // for the lifetime of the app session (ChatScreenState survives tab
+  // switches via IndexedStack) — a real, unbounded memory-growth risk on
+  // a years-old couple's account. FIFO (not true LRU) is a deliberate
+  // simplification: messages are read roughly in scroll/search order, so
+  // insertion order approximates recency well enough for this cache's
+  // purpose (avoiding redundant re-decryption of visible bubbles), without
+  // needing to track last-access time per entry.
+  static const _decryptedTextCacheLimit = 500;
   final Map<String, String> _decryptedTextCache = {};
   SecretKey? _sharedKey;
+
+  void _cacheDecryptedText(String id, String value) {
+    _decryptedTextCache[id] = value;
+    while (_decryptedTextCache.length > _decryptedTextCacheLimit) {
+      _decryptedTextCache.remove(_decryptedTextCache.keys.first);
+    }
+  }
 
   Future<void> _initSharedKey() async {
     try {
@@ -130,11 +156,17 @@ class ChatScreenState extends State<ChatScreen> {
     if (_decryptedTextCache.containsKey(message.id)) {
       return _decryptedTextCache[message.id]!;
     }
-    _decryptMessageInBackground(message);
+    _decryptMessageInBackground(message, message.id);
     return '...';
   }
 
-  Future<void> _decryptMessageInBackground(Message message) async {
+  /// [cacheKey] is separate from [message.id] so the reply-preview path
+  /// (see _getOrDecryptReplyText) can decrypt the SAME ciphertext under a
+  /// different cache entry than the original message's own — otherwise
+  /// both write to the same key, and if a key rotation/restore
+  /// (resetDecryptionState()) races between the two decrypt calls, one can
+  /// silently overwrite the other with a value decrypted under a stale key.
+  Future<void> _decryptMessageInBackground(Message message, String cacheKey) async {
     try {
       SecretKey? key = _sharedKey;
       if (key == null) {
@@ -142,7 +174,7 @@ class ChatScreenState extends State<ChatScreen> {
         if (partnerPubKey == null) {
           if (mounted) {
             setState(() {
-              _decryptedTextCache[message.id] = message.text; // Fallback to raw text if no key found yet
+              _cacheDecryptedText(cacheKey, message.text); // Fallback to raw text if no key found yet
             });
           }
           return;
@@ -154,13 +186,13 @@ class ChatScreenState extends State<ChatScreen> {
       final decrypted = await CryptoService().decryptText(encryptedData, key);
       if (mounted) {
         setState(() {
-          _decryptedTextCache[message.id] = decrypted;
+          _cacheDecryptedText(cacheKey, decrypted);
         });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
-          _decryptedTextCache[message.id] = '[Decryption failed: $e]';
+          _cacheDecryptedText(cacheKey, '[Decryption failed: $e]');
         });
       }
     }
@@ -174,8 +206,12 @@ class ChatScreenState extends State<ChatScreen> {
     final replyId = message.replyToId;
     if (replyId == null) return '...';
 
-    if (_decryptedTextCache.containsKey(replyId)) {
-      return _decryptedTextCache[replyId]!;
+    // Own namespace ("reply:" prefix), distinct from the original
+    // message's own cache entry under plain replyId — see
+    // _decryptMessageInBackground's doc comment for why.
+    final cacheKey = 'reply:$replyId';
+    if (_decryptedTextCache.containsKey(cacheKey)) {
+      return _decryptedTextCache[cacheKey]!;
     }
 
     final dummyReplyMsg = Message(
@@ -185,7 +221,7 @@ class ChatScreenState extends State<ChatScreen> {
       type: MessageType.text,
       sentAt: DateTime.now(),
     );
-    _decryptMessageInBackground(dummyReplyMsg);
+    _decryptMessageInBackground(dummyReplyMsg, cacheKey);
     return '...';
   }
 
@@ -261,6 +297,7 @@ class ChatScreenState extends State<ChatScreen> {
       setState(() {
         _messages = messages;
         _pageCursor = rows.isEmpty ? null : rows.last.sentAt;
+        _pageCursorId = rows.isEmpty ? null : rows.last.id;
         _hasMore = rows.length == 50;
         _initialLoading = false;
       });
@@ -333,7 +370,14 @@ class ChatScreenState extends State<ChatScreen> {
       final updated = _messages.map((m) => streamMap[m.id] ?? m).toList();
       _messages = [...newOnes, ...updated];
     });
-    if (widget.isActive) {
+    // markMessagesRead() does a full, unwindowed collection read+write —
+    // only worth calling when there's actually a new partner message to
+    // mark, not on every stream emission. Without this guard, any
+    // unrelated update (a reaction, a delivery receipt) that re-emits
+    // watchLatest() while the chat is open re-triggered a full messages
+    // collection scan every time, including from mark-as-read's own write
+    // round-tripping back through the same listener.
+    if (widget.isActive && newPartnerMessages.isNotEmpty) {
       _firestore.markMessagesRead(_coupleId, _myUid);
     }
   }
@@ -370,7 +414,8 @@ class ChatScreenState extends State<ChatScreen> {
   Future<void> _loadMoreMessages() async {
     if (_isLoadingMore || !_hasMore || _pageCursor == null) return;
     setState(() => _isLoadingMore = true);
-    final rows = await _messageDao.fetchPage(50, beforeSentAtMillis: _pageCursor);
+    final rows = await _messageDao.fetchPage(50,
+        beforeSentAtMillis: _pageCursor, beforeId: _pageCursorId);
     if (!mounted) return;
     final pageMessages = _applyRows(rows);
     setState(() {
@@ -379,6 +424,7 @@ class ChatScreenState extends State<ChatScreen> {
           pageMessages.where((m) => !existingIds.contains(m.id)).toList();
       _messages = [..._messages, ...newOnes];
       _pageCursor = rows.isEmpty ? _pageCursor : rows.last.sentAt;
+      _pageCursorId = rows.isEmpty ? _pageCursorId : rows.last.id;
       _hasMore = rows.length == 50;
       _isLoadingMore = false;
     });

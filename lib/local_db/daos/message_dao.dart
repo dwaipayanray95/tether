@@ -1,4 +1,5 @@
 import 'package:drift/drift.dart';
+import '../../services/log_service.dart';
 import '../app_database.dart';
 import '../converters.dart';
 
@@ -25,13 +26,29 @@ class MessageDao {
   /// One-shot page fetch for pagination ("load more" scrolling toward
   /// older messages) — mirrors fetchMessagePage's startAfter(cursor)
   /// semantics using a plain sentAt cursor instead of a DocumentSnapshot.
-  /// Exclusive of [beforeSentAtMillis] (strictly older), matching
-  /// Firestore's startAfterDocument() being exclusive of the cursor doc.
-  Future<List<MessageRow>> fetchPage(int limit, {int? beforeSentAtMillis}) {
+  ///
+  /// Ordered by (sentAt, id) rather than sentAt alone, and the cursor is
+  /// the same compound pair — sentAt alone isn't a unique sort key
+  /// (multiple messages can legitimately share the same millisecond, e.g.
+  /// rapid-fire sends), so a plain `sentAt < cursor` boundary could cut a
+  /// tied group of messages in half and silently drop the remainder of
+  /// that group from every subsequent page forever. `id` (a UUID) has no
+  /// natural ordering relationship to send time, but it only needs to be
+  /// a stable, deterministic tiebreaker, not a meaningful one.
+  Future<List<MessageRow>> fetchPage(int limit,
+      {int? beforeSentAtMillis, String? beforeId}) {
     final query = _db.select(_db.messages)
-      ..orderBy([(m) => OrderingTerm.desc(m.sentAt)])
+      ..orderBy([
+        (m) => OrderingTerm.desc(m.sentAt),
+        (m) => OrderingTerm.desc(m.id),
+      ])
       ..limit(limit);
-    if (beforeSentAtMillis != null) {
+    if (beforeSentAtMillis != null && beforeId != null) {
+      query.where((m) =>
+          m.sentAt.isSmallerThanValue(beforeSentAtMillis) |
+          (m.sentAt.equals(beforeSentAtMillis) &
+              m.id.isSmallerThanValue(beforeId)));
+    } else if (beforeSentAtMillis != null) {
       query.where((m) => m.sentAt.isSmallerThanValue(beforeSentAtMillis));
     }
     return query.get();
@@ -54,13 +71,25 @@ class MessageDao {
   /// firestore_service.dart's fetchMessagesSince(), just reading the local
   /// DB (already fully synced by LocalSyncService) instead of Firestore
   /// directly. A null [since] means "everything" (first backup ever).
+  /// Converts row-by-row rather than a single .map().toList() — this feeds
+  /// the backup pipeline, so one malformed row must not abort the entire
+  /// backup run for every message (same lesson as the earlier reactions/
+  /// readTimes production bug, applied here to the backup-facing path).
   Future<List<Map<String, dynamic>>> fetchSince(DateTime? since) async {
     final query = _db.select(_db.messages);
     if (since != null) {
       query.where((m) => m.updatedAt.isBiggerThanValue(since.toUtc().millisecondsSinceEpoch));
     }
     final rows = await query.get();
-    return rows.map(messageMapFromRow).toList();
+    final result = <Map<String, dynamic>>[];
+    for (final row in rows) {
+      try {
+        result.add(messageMapFromRow(row));
+      } catch (e) {
+        LogService.log('MessageDao: failed to convert row ${row.id} for backup: $e');
+      }
+    }
+    return result;
   }
 
   Future<void> upsertBatch(List<MessagesCompanion> rows) async {

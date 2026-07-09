@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../config/env_config.dart';
 import '../../services/auth_service.dart';
 import '../../services/firestore_service.dart';
 import '../../services/location_service.dart';
@@ -154,7 +155,7 @@ class _CompassCardState extends State<CompassCard>
 
     final partnerKey = _auth.isRay ? 'aproo' : 'ray';
     _partnerRadarActiveSub = _rtdb
-        .ref('proximity_sync/ray-aproo/$partnerKey/active')
+        .ref('proximity_sync/${EnvConfig.coupleId}/$partnerKey/active')
         .onValue
         .listen((event) {
       final active = event.snapshot.value as bool? ?? false;
@@ -300,7 +301,7 @@ class _CompassCardState extends State<CompassCard>
     setState(() => _proximityActive = true);
 
     _rtdbProximitySub =
-        _rtdb.ref('proximity_sync/ray-aproo/$partnerKey').onValue.listen((event) {
+        _rtdb.ref('proximity_sync/${EnvConfig.coupleId}/$partnerKey').onValue.listen((event) {
       final data = event.snapshot.value as Map?;
       if (data != null && mounted) {
         setState(() {
@@ -335,7 +336,7 @@ class _CompassCardState extends State<CompassCard>
         Timer.periodic(const Duration(milliseconds: 333), (timer) async {
       final pos = _myPosition;
       if (pos != null) {
-        await _rtdb.ref('proximity_sync/ray-aproo/$myKey').set({
+        await _rtdb.ref('proximity_sync/${EnvConfig.coupleId}/$myKey').set({
           'lat': pos.latitude,
           'lng': pos.longitude,
           'active': true,
@@ -356,7 +357,7 @@ class _CompassCardState extends State<CompassCard>
     _rtdbProximityTimer = null;
 
     final myKey = _auth.isRay ? 'ray' : 'aproo';
-    _rtdb.ref('proximity_sync/ray-aproo/$myKey/active').set(false);
+    _rtdb.ref('proximity_sync/${EnvConfig.coupleId}/$myKey/active').set(false);
 
     if (mounted) {
       setState(() {

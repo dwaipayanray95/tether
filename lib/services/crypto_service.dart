@@ -4,6 +4,7 @@ import 'dart:math' show Random;
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../config/env_config.dart';
 import 'auth_service.dart';
 import 'log_service.dart';
 
@@ -186,11 +187,22 @@ class CryptoService {
 
   // ── PIN-Based Backup Cryptography ──────────────────────────────────────────
 
-  /// Derive key from PIN using PBKDF2.
-  Future<SecretKey> _deriveKeyFromPin(String pin, List<int> salt) async {
+  // The PIN is only 4 digits (10,000 possible values), so the PBKDF2 work
+  // factor is the only thing standing between an attacker who obtains the
+  // Drive key-backup file and the raw E2EE private key — it must be high
+  // enough that brute-forcing all 10,000 PINs is expensive, not just
+  // "slower than nothing". 600,000 iterations of PBKDF2-HMAC-SHA256 matches
+  // OWASP's current minimum guidance for this algorithm.
+  static const _pbkdf2Iterations = 600000;
+
+  /// Derive key from PIN using PBKDF2. [iterations] is stored in the backup
+  /// payload itself (see encryptPrivateKey/decryptPrivateKey) rather than
+  /// hardcoded here, so a future increase to this constant doesn't break
+  /// decrypting backups already sitting on a user's Drive at the old count.
+  Future<SecretKey> _deriveKeyFromPin(String pin, List<int> salt, int iterations) async {
     final pbkdf2 = Pbkdf2(
       macAlgorithm: Hmac.sha256(),
-      iterations: 1000,
+      iterations: iterations,
       bits: 256,
     );
     return await pbkdf2.deriveKeyFromPassword(
@@ -203,7 +215,7 @@ class CryptoService {
   Future<Map<String, String>> encryptPrivateKey(String pin, String privateKeyBase64) async {
     final random = Random.secure();
     final salt = List<int>.generate(16, (i) => random.nextInt(256));
-    final key = await _deriveKeyFromPin(pin, salt);
+    final key = await _deriveKeyFromPin(pin, salt, _pbkdf2Iterations);
     final plainBytes = utf8.encode(privateKeyBase64);
 
     final secretBox = await _aesGcm.encrypt(plainBytes, secretKey: key);
@@ -213,17 +225,23 @@ class CryptoService {
       'nonce': base64Encode(secretBox.nonce),
       'mac': base64Encode(secretBox.mac.bytes),
       'salt': base64Encode(salt),
+      'iterations': _pbkdf2Iterations.toString(),
     };
   }
 
-  /// Decrypt private key using user's PIN code.
+  /// Decrypt private key using user's PIN code. Reads the iteration count
+  /// from the backup payload rather than assuming the current constant —
+  /// backups written before this field existed default to 1000 (the
+  /// original hardcoded value), so old Drive backups keep decrypting
+  /// correctly even after _pbkdf2Iterations is raised.
   Future<String> decryptPrivateKey(String pin, Map<String, dynamic> backupData) async {
     final cipherText = base64Decode(backupData['ciphertext'] as String);
     final nonce = base64Decode(backupData['nonce'] as String);
     final mac = Mac(base64Decode(backupData['mac'] as String));
     final salt = base64Decode(backupData['salt'] as String);
+    final iterations = int.tryParse(backupData['iterations'] as String? ?? '') ?? 1000;
 
-    final key = await _deriveKeyFromPin(pin, salt);
+    final key = await _deriveKeyFromPin(pin, salt, iterations);
     final secretBox = SecretBox(cipherText, nonce: nonce, mac: mac);
     final decryptedBytes = await _aesGcm.decrypt(secretBox, secretKey: key);
 
@@ -233,7 +251,9 @@ class CryptoService {
   Future<String?> fetchPartnerPublicKey() async {
     try {
       final partnerKey = AuthService().partnerName.toLowerCase();
-      final doc = await FirebaseFirestore.instance.doc('couples/ray-aproo/status/presence').get();
+      final doc = await FirebaseFirestore.instance
+          .doc('couples/${EnvConfig.coupleId}/status/presence')
+          .get();
       final data = doc.data();
       if (data != null && data[partnerKey] != null) {
         return data[partnerKey]['publicKey'] as String?;

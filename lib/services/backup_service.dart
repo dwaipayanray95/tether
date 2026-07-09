@@ -84,8 +84,21 @@ class BackupService {
   final CommentDao _commentDao = CommentDao(AppDatabase.instance());
   final StickyNoteDao _stickyNoteDao = StickyNoteDao(AppDatabase.instance());
 
-  List<Map<String, dynamic>> _sanitizeList(List<Map<String, dynamic>> docs) =>
-      docs.map((d) => sanitizeForJson(d) as Map<String, dynamic>).toList();
+  /// Converts row-by-row rather than a single .map().toList() — one
+  /// document that fails sanitization (or produces a shape the cast
+  /// doesn't expect) must not abort backup of every other document in the
+  /// same collection.
+  List<Map<String, dynamic>> _sanitizeList(List<Map<String, dynamic>> docs) {
+    final result = <Map<String, dynamic>>[];
+    for (final doc in docs) {
+      try {
+        result.add(sanitizeForJson(doc) as Map<String, dynamic>);
+      } catch (e) {
+        LogService.log('Backup: failed to sanitize doc ${doc['id']}: $e');
+      }
+    }
+    return result;
+  }
 
   Future<Map<String, dynamic>> _currentAllowlistedPreferences() async {
     final prefs = await SharedPreferences.getInstance();
@@ -151,9 +164,34 @@ class BackupService {
     }
   }
 
+  // Static, not instance-level: BackupService() is constructed fresh at
+  // every call site (main_shell.dart's cold-start await, its
+  // AppLifecycleState.resumed fire-and-forget, ForegroundBackupScheduler,
+  // and the manual "Run Backup Now" button), so an instance field would
+  // never actually catch two of those overlapping. Without this, a resume
+  // firing while the cold-start run is still in flight raced on the same
+  // cursor read/write and the same Drive generation-rotation filenames,
+  // silently losing whichever run's progress wrote last.
+  static Future<BackupRunResult>? _inFlightRun;
+
   /// Runs one incremental backup cycle. Safe to retry — nothing is
-  /// advanced/promoted unless the run fully succeeds.
-  Future<BackupRunResult> runBackup() async {
+  /// advanced/promoted unless the run fully succeeds. If a run is already
+  /// in progress (e.g. cold-start backup still running when the app is
+  /// quickly backgrounded and resumed), returns that same in-flight run's
+  /// result instead of starting a second overlapping one.
+  Future<BackupRunResult> runBackup() {
+    final existing = _inFlightRun;
+    if (existing != null) {
+      LogService.log('Backup: run already in progress, joining it instead of starting another');
+      return existing;
+    }
+    final run = _runBackupLocked();
+    _inFlightRun = run;
+    run.whenComplete(() => _inFlightRun = null);
+    return run;
+  }
+
+  Future<BackupRunResult> _runBackupLocked() async {
     try {
       final cursor = await _cursorStore.load();
 
@@ -337,12 +375,20 @@ class BackupService {
         return null;
       }
 
-      final liveTodos = _sanitizeList(await _firestore.fetchTodosSince(coupleId, null));
-      final liveComments = _sanitizeList(await _firestore.fetchCommentsSince(null));
-      final liveMessages =
-          _sanitizeList(await _firestore.fetchMessagesSince(coupleId, null));
-      final liveStickyNotes =
-          _sanitizeList(await _firestore.fetchStickyNotesSince(coupleId, null));
+      // Independent reads — run concurrently rather than sequentially. This
+      // runs on the fresh-install/PIN-restore path, shown with a blocking
+      // "Restoring your history..." dialog, so wall-clock time here is
+      // directly user-visible.
+      final liveResults = await Future.wait([
+        _firestore.fetchTodosSince(coupleId, null),
+        _firestore.fetchCommentsSince(null),
+        _firestore.fetchMessagesSince(coupleId, null),
+        _firestore.fetchStickyNotesSince(coupleId, null),
+      ]);
+      final liveTodos = _sanitizeList(liveResults[0]);
+      final liveComments = _sanitizeList(liveResults[1]);
+      final liveMessages = _sanitizeList(liveResults[2]);
+      final liveStickyNotes = _sanitizeList(liveResults[3]);
 
       final merged = backup.copyWith(
         todos: mergeDelta(backup.todos, liveTodos),

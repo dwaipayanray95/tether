@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:dio/dio.dart';
 import 'package:dart_jsonwebtoken/dart_jsonwebtoken.dart';
+import '../config/env_config.dart';
 import '../config/notification_config.dart';
 import 'auth_service.dart';
 import 'log_service.dart';
@@ -77,7 +78,7 @@ class FcmService {
         
         final myDoc = await FirebaseFirestore.instance
             .collection('couples')
-            .doc('ray-aproo')
+            .doc(EnvConfig.coupleId)
             .collection('fcmTokens')
             .doc(myNameKey)
             .get();
@@ -89,7 +90,7 @@ class FcmService {
 
       final doc = await FirebaseFirestore.instance
           .collection('couples')
-          .doc('ray-aproo')
+          .doc(EnvConfig.coupleId)
           .collection('fcmTokens')
           .doc(nameKey)
           .get();

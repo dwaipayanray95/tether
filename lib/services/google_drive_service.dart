@@ -43,6 +43,7 @@ class GoogleDriveService {
   // GoogleSignInClientAuthorization doesn't surface an expiry — 50 minutes
   // is a conservative TTL safely under that.
   static String? _cachedAccessToken;
+  static String? _cachedAccessTokenEmail;
   static DateTime? _cachedTokenObtainedAt;
   static Future<String>? _tokenFuture;
   static const _tokenTtl = Duration(minutes: 50);
@@ -59,11 +60,26 @@ class GoogleDriveService {
   // missing, and signs them out so the normal login flow re-requests the
   // full current scope set. That's lazy/reactive rather than checked on
   // every app open, matching how most Google Sign-In apps behave.
+  // Bound to the account it was fetched for (by email) rather than trusted
+  // blindly by TTL alone — the cache is static/app-wide, so it previously
+  // relied entirely on every sign-out path correctly calling
+  // invalidateCachedAccessToken() first. If any path ever skipped that (a
+  // direct FirebaseAuth.signOut() bypassing AuthService.signOut(), or
+  // signOut() throwing before reaching the invalidate call), a stale token
+  // for the PREVIOUS account would still be served here with nothing to
+  // catch it. Checking the currently signed-in account's email against the
+  // one the cache was fetched for closes that gap without needing every
+  // call site to get sign-out/invalidation exactly right.
   Future<String> _getAccessToken() async {
     final cached = _cachedAccessToken;
     final obtainedAt = _cachedTokenObtainedAt;
     if (cached != null && obtainedAt != null && DateTime.now().difference(obtainedAt) < _tokenTtl) {
-      return cached;
+      final currentUser = await _auth.getGoogleUser();
+      if (currentUser != null && currentUser.email == _cachedAccessTokenEmail) {
+        return cached;
+      }
+      LogService.log('Google Drive: Cached token belongs to a different account, refetching');
+      invalidateCachedAccessToken();
     }
     return _tokenFuture ??= _fetchAccessToken().whenComplete(() => _tokenFuture = null);
   }
@@ -93,6 +109,7 @@ class GoogleDriveService {
     }
 
     _cachedAccessToken = token;
+    _cachedAccessTokenEmail = googleUser.email;
     _cachedTokenObtainedAt = DateTime.now();
     LogService.log('Google Drive: Successfully retrieved cached access token silently');
     return token;
@@ -102,6 +119,7 @@ class GoogleDriveService {
   /// the next request re-fetches rather than retrying a stale/invalid token.
   static void invalidateCachedAccessToken() {
     _cachedAccessToken = null;
+    _cachedAccessTokenEmail = null;
     _cachedTokenObtainedAt = null;
   }
 

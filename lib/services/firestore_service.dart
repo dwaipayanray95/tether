@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../config/env_config.dart';
 import '../models/todo_model.dart';
 import '../models/comment_model.dart';
 import '../models/message_model.dart';
@@ -22,12 +24,19 @@ class FirestoreService {
       'sentAt': FieldValue.serverTimestamp(),
     });
     final partnerName = fromName == 'Ray' ? 'aproo' : 'ray';
-    FcmService.send(
+    // Fire-and-forget by design (the poke itself already succeeded via the
+    // Firestore write above) — but wrapped so a future change to
+    // FcmService.send that lets an exception escape its internal catch
+    // can't become a silent, untraceable unhandled Future rejection.
+    unawaited(FcmService.send(
       partnerName: partnerName,
       title: '💕 $fromName poked you!',
       body: 'Open the app to poke back',
       type: 'poke',
-    );
+    ).catchError((e) {
+      LogService.log('FCM: sendPoke notification failed: $e');
+      return (success: false, message: '$e');
+    }));
   }
 
   Stream<DocumentSnapshot<Map<String, dynamic>>> pokeStatusStream(String coupleId) {
@@ -96,12 +105,15 @@ class FirestoreService {
     final auth = AuthService();
     final senderName = auth.myName;
     final partnerName = auth.partnerName.toLowerCase();
-    FcmService.send(
+    unawaited(FcmService.send(
       partnerName: partnerName,
       title: '✅ New task added',
       body: '$senderName added a task',
       type: 'todo',
-    );
+    ).catchError((e) {
+      LogService.log('FCM: addTodo notification failed: $e');
+      return (success: false, message: '$e');
+    }));
   }
 
   Future<void> toggleTodo(String coupleId, TodoItem todo) async {
@@ -224,12 +236,15 @@ class FirestoreService {
         .collection('comments')
         .add(encryptedComment.toMap());
     final partnerName = comment.authorName == 'Ray' ? 'aproo' : 'ray';
-    FcmService.send(
+    unawaited(FcmService.send(
       partnerName: partnerName,
       title: '🗨️ ${comment.authorName} commented',
       body: 'New note left on task',
       type: 'todo',
-    );
+    ).catchError((e) {
+      LogService.log('FCM: addComment notification failed: $e');
+      return (success: false, message: '$e');
+    }));
   }
 
   Future<void> deleteComment(
@@ -318,12 +333,15 @@ class FirestoreService {
             ? '${message.text.substring(0, 60)}…'
             : message.text;
       }
-      FcmService.send(
+      unawaited(FcmService.send(
         partnerName: partnerName,
         title: senderName,
         body: preview,
         type: 'chat',
-      );
+      ).catchError((e) {
+        LogService.log('FCM: sendMessage notification failed: $e');
+        return (success: false, message: '$e');
+      }));
     }
   }
 
@@ -411,7 +429,7 @@ class FirestoreService {
 
   Future<void> updatePresence(String myKey) async {
     LogService.log('Updating presence for $myKey');
-    await _db.doc('couples/ray-aproo/status/presence').set({
+    await _db.doc('couples/${EnvConfig.coupleId}/status/presence').set({
       myKey: {
         'lastSeen': FieldValue.serverTimestamp(),
       }
@@ -420,7 +438,7 @@ class FirestoreService {
 
   Future<void> registerPublicKey(String myKey, String publicKeyBase64) async {
     LogService.log('Registering E2EE public key for $myKey');
-    await _db.doc('couples/ray-aproo/status/presence').set({
+    await _db.doc('couples/${EnvConfig.coupleId}/status/presence').set({
       myKey: {
         'publicKey': publicKeyBase64,
       }
@@ -428,12 +446,12 @@ class FirestoreService {
   }
 
   Stream<DocumentSnapshot<Map<String, dynamic>>> presenceStream() {
-    return _db.doc('couples/ray-aproo/status/presence').snapshots();
+    return _db.doc('couples/${EnvConfig.coupleId}/status/presence').snapshots();
   }
 
   Future<void> updateMusicPresence(String myKey, Map<String, dynamic>? musicData) async {
     LogService.log('Updating music presence for $myKey: ${musicData?['track']}');
-    await _db.doc('couples/ray-aproo/status/presence').set({
+    await _db.doc('couples/${EnvConfig.coupleId}/status/presence').set({
       myKey: {
         'music': musicData,
       }
@@ -442,7 +460,7 @@ class FirestoreService {
 
   Future<void> updateBatteryPresence(String myKey, int batteryLevel, bool isCharging) async {
     LogService.log('Updating battery presence for $myKey: $batteryLevel% (charging: $isCharging)');
-    await _db.doc('couples/ray-aproo/status/presence').set({
+    await _db.doc('couples/${EnvConfig.coupleId}/status/presence').set({
       myKey: {
         'battery': {
           'level': batteryLevel,

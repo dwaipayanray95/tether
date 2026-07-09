@@ -671,7 +671,14 @@ net is proven trustworthy in production.
   Phase 2 to recur — only `todo_screen.dart`'s FAB had been fixed
   previously; these two were missed because the earlier investigation
   assumed (incorrectly) there was only one `FloatingActionButton` in the
-  app.
+  app. **User-verified on device:** cursor-key bump triggered the
+  self-healing full re-backfill on next launch (1134 messages, matching
+  live Firestore), and the Hero collision no longer reproduces when
+  navigating tabs after sending a message. A full fresh install
+  (uninstall + reinstall, E2EE PIN restore, chat/todo/sticky-note history
+  present) was also tested end-to-end and confirmed working — this is the
+  final on-device verification for the entire local-first migration
+  (Phases 0-5); the plan in `delegated-zooming-lemur.md` is complete.
 
 **E2EE posture — do not change:** the local DB stores ciphertext exactly
 like Firestore does today. No plaintext at rest locally. Decryption stays

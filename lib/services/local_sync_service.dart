@@ -174,9 +174,7 @@ class LocalSyncService {
         upserts.add(todoRowFromFirestoreMap(change.doc.id, data));
       }
       if (upserts.isNotEmpty) await todoDao.upsertBatch(upserts);
-      for (final id in deletedIds) {
-        await todoDao.deleteById(id);
-      }
+      await todoDao.deleteByIds(deletedIds);
     }, onError: (e) {
       LogService.log('LocalSyncService: todos listener error: $e');
     });
@@ -202,9 +200,7 @@ class LocalSyncService {
         upserts.add(stickyNoteRowFromFirestoreMap(change.doc.id, data));
       }
       if (upserts.isNotEmpty) await stickyNoteDao.upsertBatch(upserts);
-      for (final id in deletedIds) {
-        await stickyNoteDao.deleteById(id);
-      }
+      await stickyNoteDao.deleteByIds(deletedIds);
     }, onError: (e) {
       LogService.log('LocalSyncService: sticky notes listener error: $e');
     });
@@ -235,9 +231,7 @@ class LocalSyncService {
         upserts.add(commentRowFromFirestoreMap(change.doc.id, todoId, data));
       }
       if (upserts.isNotEmpty) await commentDao.upsertBatch(upserts);
-      for (final id in deletedIds) {
-        await commentDao.deleteById(id);
-      }
+      await commentDao.deleteByIds(deletedIds);
     }, onError: (e) {
       LogService.log('LocalSyncService: comments listener error: $e');
     });

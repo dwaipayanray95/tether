@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../../config/env_config.dart';
 import '../../services/firestore_service.dart';
 import '../../theme/app_theme.dart';
 
@@ -14,7 +15,7 @@ class QuickActions extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final myUid = FirebaseAuth.instance.currentUser?.uid ?? '';
-    const coupleId = 'ray-aproo';
+    const coupleId = EnvConfig.coupleId;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

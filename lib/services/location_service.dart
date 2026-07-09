@@ -2,11 +2,12 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../config/env_config.dart';
 import 'fcm_service.dart';
 import 'log_service.dart';
 
 class LocationService {
-  static const _coupleId = 'ray-aproo';
+  static const _coupleId = EnvConfig.coupleId;
 
   static Future<String?> getLocality(double lat, double lng) async {
     try {

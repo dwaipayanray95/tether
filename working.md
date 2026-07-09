@@ -84,8 +84,8 @@ purge job is a separate, later effort.
   dates) the existing pure merge functions already expect, so
   `backup_merge.dart` needed zero changes. `_verifyIntegrity()` deliberately
   left pointed at live Firestore, not the local copy — see the design
-  discussion below for why. **Awaiting device verification** (Diagnostics →
-  "Run Backup Now" / "Inspect Backup State").
+  discussion below for why. **User-verified on device:** "Run Backup Now"
+  and "Inspect Backup State" both confirmed working.
 
 - **Post-Phase-4 fix: incremental message backfill.** User asked whether
   restarts could be made faster now that everything loads via the local
@@ -151,6 +151,18 @@ purge job is a separate, later effort.
   non-converging count mismatch in "Inspect Local DB" is a real signal
   worth chasing, not noise — this one turned out to be an actively
   worsening data-loss bug, not a timing artifact.
+
+  **User-verified on device:** confirmed the messages listener fix and Hero
+  fix both hold — the self-healing full re-backfill ran on first launch
+  after the cursor-key bump (1134 messages, matching live Firestore), and
+  navigating between tabs after sending a message no longer throws the
+  Hero collision error. Separately, a full fresh install (uninstall +
+  reinstall) was tested end-to-end and confirmed working: E2EE PIN
+  restore, chat/todo/sticky-note history all present via
+  `LocalDbHydrationService`, no errors. **This is the final verification
+  step for the entire local-first migration (Phases 0-5) — the plan in
+  `delegated-zooming-lemur.md` is now complete and confirmed working on a
+  real device, not just via unit tests and `flutter analyze`/`build`.**
 
 ## Design discussion: why convert dates at all? (asked mid-Phase-4)
 

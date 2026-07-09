@@ -12,6 +12,7 @@ import 'package:drift/drift.dart';
 /// @DataClassName renames the generated row class to TodoCommentRow — Drift's
 /// default would collide with the app's own TodoComment model.
 @DataClassName('TodoCommentRow')
+@TableIndex(name: 'comments_todo_id', columns: {#todoId})
 class TodoComments extends Table {
   TextColumn get id => text()();
   TextColumn get todoId => text()();

@@ -38,13 +38,24 @@ class CommentDao {
   /// same semantics as firestore_service.dart's fetchCommentsSince()
   /// (createdAt as cursor, not updatedAt — comments are immutable after
   /// creation).
+  /// Converts row-by-row rather than a single .map().toList() — this feeds
+  /// the backup pipeline, so one malformed row must not abort the entire
+  /// backup run for every comment.
   Future<List<Map<String, dynamic>>> fetchSince(DateTime? since) async {
     final query = _db.select(_db.todoComments);
     if (since != null) {
       query.where((c) => c.createdAt.isBiggerThanValue(since.toUtc().millisecondsSinceEpoch));
     }
     final rows = await query.get();
-    return rows.map(commentMapFromRow).toList();
+    final result = <Map<String, dynamic>>[];
+    for (final row in rows) {
+      try {
+        result.add(commentMapFromRow(row));
+      } catch (e) {
+        LogService.log('CommentDao: failed to convert row ${row.id} for backup: $e');
+      }
+    }
+    return result;
   }
 
   Future<void> upsertBatch(List<TodoCommentsCompanion> rows) async {
@@ -57,4 +68,11 @@ class CommentDao {
   Future<void> deleteById(String id) => (_db.delete(_db.todoComments)
         ..where((c) => c.id.equals(id)))
       .go();
+
+  /// Single statement for N deletes instead of N sequential awaited
+  /// statements — see TodoDao.deleteByIds for why.
+  Future<void> deleteByIds(List<String> ids) async {
+    if (ids.isEmpty) return;
+    await (_db.delete(_db.todoComments)..where((c) => c.id.isIn(ids))).go();
+  }
 }

@@ -32,7 +32,37 @@ class AppDatabase extends _$AppDatabase {
   factory AppDatabase.instance() => _instance ??= AppDatabase();
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
+
+  // v2: added indices on the columns every DAO actually queries/sorts on
+  // (sentAt/updatedAt/createdAt/todoId) — v1 had none, so every pagination,
+  // sync-delta, and per-todo-comment query was a full table scan that got
+  // worse as history grew. A fresh install (schemaVersion mismatch against
+  // an empty DB) goes through onCreate, which already includes the indices
+  // via createAll(); onUpgrade only needs to add them to a v1 DB that
+  // already has data.
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+        onCreate: (m) => m.createAll(),
+        onUpgrade: (m, from, to) async {
+          if (from < 2) {
+            await m.createIndex(Index('messages_sent_at',
+                'CREATE INDEX messages_sent_at ON messages (sent_at)'));
+            await m.createIndex(Index('messages_updated_at',
+                'CREATE INDEX messages_updated_at ON messages (updated_at)'));
+            await m.createIndex(Index('todos_created_at',
+                'CREATE INDEX todos_created_at ON todos (created_at)'));
+            await m.createIndex(Index('todos_updated_at',
+                'CREATE INDEX todos_updated_at ON todos (updated_at)'));
+            await m.createIndex(Index('comments_todo_id',
+                'CREATE INDEX comments_todo_id ON todo_comments (todo_id)'));
+            await m.createIndex(Index('sticky_notes_created_at',
+                'CREATE INDEX sticky_notes_created_at ON sticky_notes (created_at)'));
+            await m.createIndex(Index('sticky_notes_updated_at',
+                'CREATE INDEX sticky_notes_updated_at ON sticky_notes (updated_at)'));
+          }
+        },
+      );
 }
 
 LazyDatabase _openConnection() {

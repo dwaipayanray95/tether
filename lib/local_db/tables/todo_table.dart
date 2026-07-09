@@ -4,6 +4,11 @@ import 'package:drift/drift.dart';
 /// is stored as a JSON-encoded list of {id, title, isDone} maps, same shape
 /// ChecklistItem.toMap() already produces. `updatedAt` is a local sync-cursor
 /// bookkeeping column, same convention as message_table.dart.
+///
+/// Indexed on createdAt (watchAll's sort column) and updatedAt (fetchSince's
+/// sync-delta filter).
+@TableIndex(name: 'todos_created_at', columns: {#createdAt})
+@TableIndex(name: 'todos_updated_at', columns: {#updatedAt})
 class Todos extends Table {
   TextColumn get id => text()();
   TextColumn get title => text()();

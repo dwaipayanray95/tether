@@ -7,6 +7,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
+import '../config/env_config.dart';
 import '../models/todo_model.dart';
 import 'nav_service.dart';
 import 'auth_service.dart';
@@ -281,7 +282,7 @@ class NotificationService {
     final myName = email == allowedEmails[0] ? 'ray' : 'aproo';
     await FirebaseFirestore.instance
         .collection('couples')
-        .doc('ray-aproo')
+        .doc(EnvConfig.coupleId)
         .collection('fcmTokens')
         .doc(myName)
         .set({'token': token});
