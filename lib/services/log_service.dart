@@ -8,6 +8,18 @@ class LogService {
   static bool _isEnabled = false;
   static File? _logFile;
 
+  // The log file previously grew unbounded — with logging enabled across
+  // several days of normal use (lifecycle events, presence updates, sync
+  // backfills, etc. all logging on their own schedules), it became large
+  // enough to be unwieldy to read/share for troubleshooting. Cap it and
+  // self-trim from the front (oldest entries) once it grows past the cap,
+  // keeping the on-device log a rolling recent-history window instead of a
+  // permanent archive — Diagnostics' "Copy Logs" is for troubleshooting
+  // what's happening now, not long-term storage.
+  static const _maxLogBytes = 1 * 1024 * 1024; // 1MB
+  static int _writesSinceTrimCheck = 0;
+  static const _trimCheckInterval = 50;
+
   static bool get isEnabled => _isEnabled;
 
   static Future<void> init() async {
@@ -41,9 +53,37 @@ class LogService {
       final timestamp = DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.now());
       await _logFile!.writeAsString('[$timestamp] $message\n', mode: FileMode.append);
       debugPrint('LOG: $message');
+      _writesSinceTrimCheck++;
+      if (_writesSinceTrimCheck >= _trimCheckInterval) {
+        _writesSinceTrimCheck = 0;
+        await _trimIfNeeded();
+      }
     } catch (e) {
       debugPrint('Failed to write log: $e');
     }
+  }
+
+  /// Only checked every [_trimCheckInterval] writes (not every single
+  /// call) — length()/readAsString() on every log line would be wasteful,
+  /// and being off by up to that many lines' worth of size is harmless for
+  /// a rolling troubleshooting log.
+  static Future<void> _trimIfNeeded() async {
+    final file = _logFile;
+    if (file == null) return;
+    final length = await file.length();
+    if (length <= _maxLogBytes) return;
+
+    final content = await file.readAsString();
+    // Keep the newest half of the cap, not the newest ~everything — trimming
+    // to just under the cap would mean re-trimming almost immediately on
+    // the very next check interval.
+    final keepFromChar = content.length - (_maxLogBytes ~/ 2);
+    final tail = content.substring(keepFromChar > 0 ? keepFromChar : 0);
+    // Drop the (likely partial) first line so every remaining line is whole.
+    final firstNewline = tail.indexOf('\n');
+    final clean = firstNewline == -1 ? tail : tail.substring(firstNewline + 1);
+    await file.writeAsString(
+        '[log trimmed — older entries dropped to keep this file manageable]\n$clean');
   }
 
   static Future<String> getLogs() async {

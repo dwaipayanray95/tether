@@ -32,6 +32,18 @@ class _TodoScreenState extends State<TodoScreen> {
   static const String _coupleId = coupleId;
   bool _showDone = false;
 
+  // Signature of the last todo list syncTodoNotifications() actually ran
+  // against — watchAllAsModels() re-emits on ANY todo table change
+  // (including unrelated writes from the partner's device round-tripping
+  // through the sync listener), and syncTodoNotifications() was being
+  // called from the StreamBuilder's builder on every single emission,
+  // rescheduling every pending todo's notification again each time even
+  // when nothing about scheduling-relevant fields (dueDate/isDone)
+  // actually changed. That was pure noise: real work repeated for no
+  // reason, and it dominated the on-device log with duplicate "Scheduling
+  // local notification..." lines. Only re-sync when this signature changes.
+  String? _lastNotificationSyncSignature;
+
   // E2EE decryption cache
   final Map<String, String> _decryptedTextCache = {};
 
@@ -416,9 +428,15 @@ class _TodoScreenState extends State<TodoScreen> {
             return const Center(child: CircularProgressIndicator());
           }
           final todos = snap.data!;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            NotificationService.syncTodoNotifications(todos);
-          });
+          final signature = todos
+              .map((t) => '${t.id}:${t.dueDate}:${t.isDone}')
+              .join('|');
+          if (signature != _lastNotificationSyncSignature) {
+            _lastNotificationSyncSignature = signature;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              NotificationService.syncTodoNotifications(todos);
+            });
+          }
           final pending = todos.where((t) => !t.isDone).toList();
           final done = todos.where((t) => t.isDone).toList();
           done.sort((a, b) {

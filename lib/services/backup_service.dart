@@ -277,10 +277,10 @@ class BackupService {
       // 5. Integrity check: the backup must never contain fewer live
       // records than Firestore currently has (it's fine for it to have
       // more, once purging of old messages is introduced later).
-      final ok = await _verifyIntegrity(merged);
-      if (!ok) {
+      final integrity = await _verifyIntegrity(merged);
+      if (!integrity.ok) {
         const msg = 'Integrity check failed, aborting promotion';
-        LogService.log('Backup: $msg');
+        LogService.log('Backup: $msg (${integrity.detail})');
         return BackupRunResult(
           success: false,
           message: msg,
@@ -442,7 +442,7 @@ class BackupService {
     return encryptedBytes.length;
   }
 
-  Future<bool> _verifyIntegrity(BackupSnapshot merged) async {
+  Future<({bool ok, String detail})> _verifyIntegrity(BackupSnapshot merged) async {
     final liveTodoCount = await _firestore.countTodos(coupleId);
     final liveMessageCount = await _firestore.countMessages(coupleId);
     final liveStickyNoteCount = await _firestore.countStickyNotes(coupleId);
@@ -450,9 +450,20 @@ class BackupService {
     // ">=" rather than "==": once old messages start getting purged from
     // Firestore, the backup will legitimately hold more than what's live.
     // It should never hold fewer than what's currently live, though.
-    return merged.todos.length >= liveTodoCount &&
-        merged.messages.length >= liveMessageCount &&
-        merged.stickyNotes.length >= liveStickyNoteCount;
+    final todosOk = merged.todos.length >= liveTodoCount;
+    final messagesOk = merged.messages.length >= liveMessageCount;
+    final stickyNotesOk = merged.stickyNotes.length >= liveStickyNoteCount;
+
+    // Previously this only returned a bool, so a failure logged as
+    // "Integrity check failed, aborting promotion" with no numbers —
+    // undiagnosable after the fact (was it one collection short by one
+    // row, or a real gap?). Detail string always built (not just on
+    // failure) so a future investigation can also compare successful runs.
+    final detail = 'todos: ${merged.todos.length}/$liveTodoCount, '
+        'messages: ${merged.messages.length}/$liveMessageCount, '
+        'stickyNotes: ${merged.stickyNotes.length}/$liveStickyNoteCount';
+
+    return (ok: todosOk && messagesOk && stickyNotesOk, detail: detail);
   }
 
   Future<void> _rotateGenerations() async {
