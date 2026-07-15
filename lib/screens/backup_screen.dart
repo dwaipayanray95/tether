@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../models/backup_cursor_model.dart';
 import '../services/backup_cursor_store.dart';
 import '../services/backup_service.dart';
+import '../services/local_folder_service.dart';
 import '../theme/app_theme.dart';
 
 String _formatBytes(int? bytes) {
@@ -26,16 +27,47 @@ class _BackupScreenState extends State<BackupScreen> {
   String? _resultMessage;
   bool? _lastRunSucceeded;
 
+  final _localFolder = LocalFolderService();
+  bool _localFolderConnected = false;
+  bool _checkingLocalFolder = true;
+
   @override
   void initState() {
     super.initState();
     _loadCursor();
+    _loadLocalFolderStatus();
   }
 
   Future<void> _loadCursor() async {
     await BackupService().reconcileCursorWithDriveIfNeeded();
     final cursor = await BackupCursorStore().load();
     if (mounted) setState(() => _cursor = cursor);
+  }
+
+  Future<void> _loadLocalFolderStatus() async {
+    final connected = await _localFolder.isConnected();
+    if (mounted) {
+      setState(() {
+        _localFolderConnected = connected;
+        _checkingLocalFolder = false;
+      });
+    }
+  }
+
+  Future<void> _connectLocalFolder() async {
+    final ok = await _localFolder.pickFolder();
+    if (!mounted) return;
+    setState(() => _localFolderConnected = ok);
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Folder not selected')),
+      );
+    }
+  }
+
+  Future<void> _disconnectLocalFolder() async {
+    await _localFolder.disconnect();
+    if (mounted) setState(() => _localFolderConnected = false);
   }
 
   Future<void> _runBackupNow() async {
@@ -51,7 +83,9 @@ class _BackupScreenState extends State<BackupScreen> {
     if (!mounted) return;
     setState(() {
       _isRunning = false;
-      _resultMessage = result.message;
+      _resultMessage = result.localBackupWritten
+          ? '${result.message} (local copy saved)'
+          : result.message;
       _lastRunSucceeded = result.success;
     });
   }
@@ -200,6 +234,86 @@ class _BackupScreenState extends State<BackupScreen> {
             'only need to tap "Backup Now" if you want to back up sooner.',
             style: GoogleFonts.dmSans(fontSize: 12, color: AppTheme.textMuted),
           ),
+          const SizedBox(height: 32),
+          Text(
+            'Local Backup Folder',
+            style: GoogleFonts.dmSans(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.textMuted),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: AppTheme.primaryLight,
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  _localFolderConnected ? Icons.folder_special_rounded : Icons.folder_off_rounded,
+                  color: AppTheme.primary,
+                  size: 28,
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _checkingLocalFolder
+                            ? 'Checking…'
+                            : (_localFolderConnected ? 'Connected' : 'Not connected'),
+                        style: GoogleFonts.dmSans(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.textDark,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _localFolderConnected
+                            ? 'A copy of every backup is also saved to this folder on your '
+                              'device. It survives an uninstall/reinstall, and stays available '
+                              'even if Google Drive is full or offline.'
+                            : 'Pick a folder on your device to keep an extra, always-available '
+                              'copy of your backups — independent of Google Drive.',
+                        style: GoogleFonts.dmSans(fontSize: 12, color: AppTheme.textMuted),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppTheme.primary,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+              onPressed: _checkingLocalFolder ? null : _connectLocalFolder,
+              child: Text(
+                _localFolderConnected ? 'Change Folder' : 'Choose Folder',
+                style: GoogleFonts.dmSans(fontSize: 15, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ),
+          if (_localFolderConnected) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: TextButton(
+                onPressed: _disconnectLocalFolder,
+                child: Text(
+                  'Disconnect',
+                  style: GoogleFonts.dmSans(fontSize: 13, color: AppTheme.textMuted),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );

@@ -17,6 +17,7 @@ import 'backup_merge.dart';
 import 'crypto_service.dart';
 import 'firestore_service.dart';
 import 'google_drive_service.dart';
+import 'local_folder_service.dart';
 import 'local_storage_service.dart';
 import 'log_service.dart';
 
@@ -29,6 +30,12 @@ class BackupRunResult {
   final int comments;
   final int messages;
   final int stickyNotes;
+  // Independent of [success] — the local SAF-folder write is a best-effort
+  // side write attempted regardless of how the Drive half of the run goes,
+  // so a Drive failure (network, quota) doesn't cost the user a local copy
+  // they'd otherwise have gotten. False just means no local folder is
+  // connected yet, or that write itself failed — never blocks Drive.
+  final bool localBackupWritten;
 
   const BackupRunResult({
     required this.success,
@@ -37,6 +44,7 @@ class BackupRunResult {
     this.comments = 0,
     this.messages = 0,
     this.stickyNotes = 0,
+    this.localBackupWritten = false,
   });
 }
 
@@ -83,6 +91,7 @@ class BackupService {
   final TodoDao _todoDao = TodoDao(AppDatabase.instance());
   final CommentDao _commentDao = CommentDao(AppDatabase.instance());
   final StickyNoteDao _stickyNoteDao = StickyNoteDao(AppDatabase.instance());
+  final LocalFolderService _localFolder = LocalFolderService();
 
   /// Converts row-by-row rather than a single .map().toList() — one
   /// document that fails sanitization (or produces a shape the cast
@@ -269,7 +278,14 @@ class BackupService {
         preferences: await _currentAllowlistedPreferences(),
       );
 
-      // 4. Encrypt and upload as the pending file — the last known-good
+      // 4a. Local-first: write to the on-device SAF backup folder (if
+      // connected) BEFORE attempting Drive at all. This is what makes the
+      // local folder a real fallback — if Drive is full/offline/fails below,
+      // this run has already produced a durable, on-device, uninstall-
+      // surviving copy regardless of Drive's outcome.
+      final localBackupWritten = await _writeLocalBackup(merged, sharedKey);
+
+      // 4b. Encrypt and upload as the pending file — the last known-good
       // backup is untouched until this is verified.
       final backupSizeBytes =
           await _encryptAndUpload(merged, sharedKey, BackupConfig.pendingBackupFileName);
@@ -288,6 +304,7 @@ class BackupService {
           comments: mergedComments.length,
           messages: mergedMessages.length,
           stickyNotes: mergedStickyNotes.length,
+          localBackupWritten: localBackupWritten,
         );
       }
 
@@ -339,6 +356,7 @@ class BackupService {
         comments: mergedComments.length,
         messages: mergedMessages.length,
         stickyNotes: mergedStickyNotes.length,
+        localBackupWritten: localBackupWritten,
       );
     } catch (e) {
       final msg = 'Run failed: $e';
@@ -369,9 +387,36 @@ class BackupService {
       }
       final sharedKey = await CryptoService().getSharedKey(partnerPubKey);
 
-      final backup = await _downloadAndDecrypt(sharedKey);
+      // Try both sources (not "Drive, then local only if Drive fails") and
+      // use whichever is actually newer — a local-only write can happen
+      // when Drive was down/full on a given day, so Drive isn't always the
+      // freshest copy just because it's reachable. Comparing each
+      // snapshot's own generatedAt (written by this class at merge time)
+      // rather than file/cloud-provider modified-time metadata avoids any
+      // clock-skew ambiguity between Drive's server timestamp and the
+      // device's filesystem timestamp — both generatedAt values come from
+      // the same DateTime.now() call site. Local read is on-device/cheap,
+      // so trying both unconditionally (not just as a fallback) is worth it
+      // for the freshness guarantee.
+      final driveBackup = await _downloadAndDecrypt(sharedKey);
+      final localBackup = await _downloadAndDecryptFromLocalFolder(sharedKey);
+
+      BackupSnapshot? backup;
+      if (driveBackup != null && localBackup != null) {
+        final useLocal = localBackup.generatedAt.isAfter(driveBackup.generatedAt);
+        backup = useLocal ? localBackup : driveBackup;
+        LogService.log('Backup: restoring from ${useLocal ? "local folder" : "Drive"} '
+            '(local: ${localBackup.generatedAt}, Drive: ${driveBackup.generatedAt})');
+      } else {
+        backup = driveBackup ?? localBackup;
+        if (backup != null) {
+          LogService.log(
+              'Backup: restoring from ${driveBackup != null ? "Drive" : "local folder"} '
+              '(only source available)');
+        }
+      }
       if (backup == null) {
-        LogService.log('Backup: no existing backup found to restore');
+        LogService.log('Backup: no existing backup found to restore (Drive or local)');
         return null;
       }
 
@@ -424,22 +469,73 @@ class BackupService {
   Future<BackupSnapshot?> _downloadAndDecrypt(SecretKey sharedKey) async {
     final bytes = await _drive.downloadBytesByName(BackupConfig.latestBackupFileName);
     if (bytes == null) return null;
+    return _decodeSnapshot(bytes, sharedKey);
+  }
+
+  /// Same encrypted-JSON format as Drive's copy (see _writeLocalBackup),
+  /// just read from the local SAF folder instead. Requires the user to have
+  /// (re-)picked the folder on this install — on fresh installs the
+  /// persisted URI permission from a previous install doesn't carry over
+  /// (Android ties it to the app's package), so this only helps once
+  /// they've reconnected it, same as the Diagnostics screen already asks
+  /// them to do for the folder picker generally.
+  Future<BackupSnapshot?> _downloadAndDecryptFromLocalFolder(SecretKey sharedKey) async {
+    if (!await _localFolder.isConnected()) return null;
+    final files = await _localFolder.listBackups();
+    final match = files.where((f) => f.name == BackupConfig.latestBackupFileName);
+    if (match.isEmpty) return null;
+    final bytes = await _localFolder.readBackup(match.first.uri);
+    if (bytes == null) return null;
+    LogService.log('Backup: restoring from local SAF folder (Drive unavailable)');
+    return _decodeSnapshot(bytes, sharedKey);
+  }
+
+  Future<BackupSnapshot> _decodeSnapshot(Uint8List bytes, SecretKey sharedKey) async {
     final envelope = jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
     final plainBytes = await CryptoService().decryptBytes(envelope, sharedKey);
     final json = jsonDecode(utf8.decode(plainBytes)) as Map<String, dynamic>;
     return BackupSnapshot.fromJson(json);
   }
 
+  /// Pure encryption step, split out from the actual upload so the exact
+  /// same encrypted bytes can be written to both Drive and the local SAF
+  /// backup folder without encrypting twice.
+  Future<Uint8List> _encrypt(BackupSnapshot snapshot, SecretKey sharedKey) async {
+    final plainBytes = utf8.encode(jsonEncode(snapshot.toJson()));
+    final envelope =
+        await CryptoService().encryptBytes(Uint8List.fromList(plainBytes), sharedKey);
+    return Uint8List.fromList(utf8.encode(jsonEncode(envelope)));
+  }
+
   /// Returns the uploaded byte size, so callers can record it for display
   /// (e.g. "Backup: 128 KB, just now" in the user-facing Backup screen).
   Future<int> _encryptAndUpload(
       BackupSnapshot snapshot, SecretKey sharedKey, String fileName) async {
-    final plainBytes = utf8.encode(jsonEncode(snapshot.toJson()));
-    final envelope =
-        await CryptoService().encryptBytes(Uint8List.fromList(plainBytes), sharedKey);
-    final encryptedBytes = utf8.encode(jsonEncode(envelope));
-    await _drive.uploadOrReplaceBytes(fileName, Uint8List.fromList(encryptedBytes));
+    final encryptedBytes = await _encrypt(snapshot, sharedKey);
+    await _drive.uploadOrReplaceBytes(fileName, encryptedBytes);
     return encryptedBytes.length;
+  }
+
+  /// Best-effort local-first copy, independent of whether Drive itself
+  /// succeeds — this is what makes the local SAF folder useful even when
+  /// Drive is full/offline: encrypt once here, write it locally BEFORE
+  /// attempting Drive, so a later Drive failure never costs the user a
+  /// local copy they'd already have gotten. Same filename as Drive's own
+  /// "latest" file — unlike Drive, there's no separate pending/rotate
+  /// dance locally; Drive already covers historical generations, so the
+  /// local copy is deliberately just the single newest snapshot.
+  Future<bool> _writeLocalBackup(BackupSnapshot snapshot, SecretKey sharedKey) async {
+    if (!await _localFolder.isConnected()) return false;
+    try {
+      final encryptedBytes = await _encrypt(snapshot, sharedKey);
+      final ok = await _localFolder.writeBackup(
+          BackupConfig.latestBackupFileName, encryptedBytes);
+      if (ok) LogService.log('Backup: local copy written (${encryptedBytes.length} bytes)');
+      return ok;
+    } catch (e) {
+      LogService.log('Backup: local copy failed: $e');
+      return false;
+    }
   }
 
   Future<({bool ok, String detail})> _verifyIntegrity(BackupSnapshot merged) async {
@@ -501,6 +597,8 @@ class BackupService {
   Future<void> _syncSnaps() async {
     final storage = LocalStorageService();
 
+    final localFolderConnected = await _localFolder.isConnected();
+
     final pendingUploads = await storage.pendingUploadSnaps();
     for (final snap in pendingUploads) {
       try {
@@ -508,6 +606,13 @@ class BackupService {
         final driveFileId = await _drive.uploadSnap(bytes, 'snap_${snap.id}.png');
         if (driveFileId != null) {
           await storage.updateDriveFileId(snap.id, driveFileId);
+        }
+        // Write-through to the local SAF folder too — same batched-into-
+        // backup-cycle reasoning as the Drive upload above, and this is
+        // what makes a snap recoverable after uninstall/reinstall even if
+        // Drive was never reached (space, network) for this particular run.
+        if (localFolderConnected) {
+          await _localFolder.writeSnap('snap_${snap.id}.png', bytes, 'image/png');
         }
       } catch (e) {
         LogService.log('Backup: snap upload failed for ${snap.id}: $e');

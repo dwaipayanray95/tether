@@ -57,6 +57,7 @@ jobs:
             echo "class EnvConfig {" > lib/config/env_config.dart
             echo "  static const allowedEmails = ['user1@example.com', 'user2@example.com'];" >> lib/config/env_config.dart
             echo "  static const coupleId = 'dummy-couple-id';" >> lib/config/env_config.dart
+            echo "  static const googleWebServerClientId = '';" >> lib/config/env_config.dart
             echo "}" >> lib/config/env_config.dart
           fi
 

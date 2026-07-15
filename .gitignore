@@ -6,6 +6,9 @@ lib/config/env_config.dart
 functions/lib/
 functions/node_modules/
 functions/package-lock.json
+functions/.env
+functions/.env.*
+!functions/.env.example
 
 # Miscellaneous
 *.class

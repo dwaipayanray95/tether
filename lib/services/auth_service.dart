@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../config/env_config.dart';
 import '../config/google_scopes.dart';
+import 'background_sync_auth_service.dart';
 import 'google_drive_service.dart';
 import 'log_service.dart';
 
@@ -97,6 +99,13 @@ class AuthService {
     final result = await _auth.signInWithCredential(credential);
     LogService.log('Sign-In SUCCESS: ${result.user?.email}');
     await _ensureUserDoc(result.user!);
+
+    // Best-effort, never blocks sign-in — see BackgroundSyncAuthService's
+    // doc comment. Must run after signInWithCredential() above: the
+    // exchangeGoogleAuthCode Cloud Function requires a Firebase Auth
+    // context to authorize the caller.
+    unawaited(BackgroundSyncAuthService().setupAfterSignIn());
+
     return result;
   }
 
@@ -144,6 +153,7 @@ class AuthService {
     _cachedGoogleUser = null;
     _lightweightAuthFuture = null;
     GoogleDriveService.invalidateCachedAccessToken();
+    await BackgroundSyncAuthService().clearStoredRefreshToken();
     await GoogleSignIn.instance.signOut();
     await _auth.signOut();
   }

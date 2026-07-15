@@ -8,12 +8,21 @@ import 'services/nav_service.dart';
 import 'services/log_service.dart';
 import 'services/music_sync_service.dart';
 import 'theme/app_theme.dart';
+import 'config/env_config.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
-  await GoogleSignIn.instance.initialize();
+  // serverClientId enables requestOfflineAccess() (see AuthService /
+  // BackgroundSyncAuthService) — passing an empty string here is NOT the
+  // same as omitting it, so this stays conditional until
+  // EnvConfig.googleWebServerClientId is actually configured.
+  await GoogleSignIn.instance.initialize(
+    serverClientId: EnvConfig.googleWebServerClientId.isEmpty
+        ? null
+        : EnvConfig.googleWebServerClientId,
+  );
   await LogService.init();
 
   FlutterError.onError = (details) {

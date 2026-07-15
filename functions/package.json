@@ -1,0 +1,23 @@
+{
+  "name": "tether-functions",
+  "description": "Cloud Functions for Tether — currently just the one-time serverAuthCode -> refresh_token exchange used to enable headless (background) Google Drive backup sync. See src/index.ts for the full explanation.",
+  "engines": {
+    "node": "20"
+  },
+  "main": "lib/index.js",
+  "scripts": {
+    "build": "tsc",
+    "build:watch": "tsc --watch",
+    "serve": "npm run build && firebase emulators:start --only functions",
+    "deploy": "firebase deploy --only functions",
+    "logs": "firebase functions:log"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.0.0",
+    "firebase-functions": "^6.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  },
+  "private": true
+}
