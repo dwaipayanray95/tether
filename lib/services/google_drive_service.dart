@@ -3,7 +3,10 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import '../config/google_scopes.dart';
 import 'auth_service.dart';
+import 'headless_drive_token_service.dart';
 import 'log_service.dart';
+
+enum _TokenSource { session, headless }
 
 class GoogleDriveService {
   final Dio _dio = Dio();
@@ -45,6 +48,7 @@ class GoogleDriveService {
   static String? _cachedAccessToken;
   static String? _cachedAccessTokenEmail;
   static DateTime? _cachedTokenObtainedAt;
+  static _TokenSource? _cachedTokenSource;
   static Future<String>? _tokenFuture;
   static const _tokenTtl = Duration(minutes: 50);
 
@@ -74,6 +78,15 @@ class GoogleDriveService {
     final cached = _cachedAccessToken;
     final obtainedAt = _cachedTokenObtainedAt;
     if (cached != null && obtainedAt != null && DateTime.now().difference(obtainedAt) < _tokenTtl) {
+      // Headless-sourced tokens skip the account-email re-check below: that
+      // check exists to catch a stale token surviving past a sign-out that
+      // forgot to invalidate the cache, but a headless token is minted
+      // fresh from a Cloud Function call that independently re-validates
+      // the caller's current Firebase Auth identity every time (see
+      // functions/src/index.ts's requireAllowedCaller) — there's no
+      // equivalent "currentUser" to compare against on this path, and
+      // there doesn't need to be.
+      if (_cachedTokenSource == _TokenSource.headless) return cached;
       final currentUser = await _auth.getGoogleUser();
       if (currentUser != null && currentUser.email == _cachedAccessTokenEmail) {
         return cached;
@@ -93,6 +106,25 @@ class GoogleDriveService {
   // most once per _tokenTtl, regardless of how many Drive operations happen
   // in between.
   Future<String> _fetchAccessToken() async {
+    // Prefer the refresh-token-based headless path when it's set up. This
+    // is what actually stops the Google Sign-In screen from flashing on
+    // every app launch — that flash came from attemptLightweightAuthentication()
+    // (called via _auth.getGoogleUser() below), triggered because
+    // ForegroundBackupScheduler/reconcileCursorWithDriveIfNeeded check Drive
+    // unconditionally near startup. Not calling getGoogleUser() at all for
+    // Drive purposes, once a refresh token exists, removes that trigger
+    // entirely — Google Sign-In's session is then only ever touched by the
+    // actual interactive sign-in button tap, where a UI moment is expected.
+    final headlessToken = await HeadlessDriveTokenService().getAccessToken();
+    if (headlessToken != null) {
+      _cachedAccessToken = headlessToken;
+      _cachedAccessTokenEmail = null;
+      _cachedTokenObtainedAt = DateTime.now();
+      _cachedTokenSource = _TokenSource.headless;
+      LogService.log('Google Drive: using headless (refresh-token) access token');
+      return headlessToken;
+    }
+
     LogService.log('Google Drive: Obtaining access token');
     final googleUser = await _auth.getGoogleUser();
     if (googleUser == null) {
@@ -111,6 +143,7 @@ class GoogleDriveService {
     _cachedAccessToken = token;
     _cachedAccessTokenEmail = googleUser.email;
     _cachedTokenObtainedAt = DateTime.now();
+    _cachedTokenSource = _TokenSource.session;
     LogService.log('Google Drive: Successfully retrieved cached access token silently');
     return token;
   }
@@ -121,6 +154,7 @@ class GoogleDriveService {
     _cachedAccessToken = null;
     _cachedAccessTokenEmail = null;
     _cachedTokenObtainedAt = null;
+    _cachedTokenSource = null;
   }
 
   // ── Drive Folder Management ────────────────────────────────────────────────
