@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## v3.3.5 (2026-07-16)
+
+### Other Changes
+- chore: update build scripts
+- chore: sync build and check scripts
+- chore: update CHANGELOG.md [skip ci]
+
 ## v3.3.4 (2026-07-16)
 
 ### Added
