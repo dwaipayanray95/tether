@@ -60,13 +60,11 @@ runs:
           echo "${{ inputs.keystore-base64 }}" | base64 -d > android/app/release.jks
         fi
         
-        # Write properties strictly with no leading indentations
-        cat <<EOF > android/key.properties
-storePassword=${{ inputs.keystore-password }}
-keyPassword=${{ inputs.key-password }}
-keyAlias=${{ inputs.key-alias }}
-storeFile=release.jks
-EOF
+        # Write properties cleanly using standard indented echo commands
+        echo "storePassword=${{ inputs.keystore-password }}" > android/key.properties
+        echo "keyPassword=${{ inputs.key-password }}" >> android/key.properties
+        echo "keyAlias=${{ inputs.key-alias }}" >> android/key.properties
+        echo "storeFile=release.jks" >> android/key.properties
       shell: bash
 
     - name: Cache Pub Dependencies
