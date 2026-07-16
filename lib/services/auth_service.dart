@@ -72,9 +72,11 @@ class AuthService {
 
   Future<UserCredential?> signInWithGoogle() async {
     LogService.log('Google Sign-In initiated');
-    final googleUser = await GoogleSignIn.instance.authenticate();
-    if (googleUser == null) {
-      LogService.log('Google Sign-In cancelled by user');
+    final GoogleSignInAccount googleUser;
+    try {
+      googleUser = await GoogleSignIn.instance.authenticate();
+    } catch (e) {
+      LogService.log('Google Sign-In cancelled or failed: $e');
       return null;
     }
     _cachedGoogleUser = googleUser;

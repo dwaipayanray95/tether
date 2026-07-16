@@ -19,7 +19,6 @@ import '../services/crypto_service.dart';
 import '../services/foreground_backup_scheduler.dart';
 import '../services/backup_service.dart';
 import '../services/local_db_hydration_service.dart';
-import '../services/local_folder_service.dart';
 import '../services/local_sync_service.dart';
 import '../config/env_config.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -73,12 +72,6 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       unawaited(LocalSyncService().startAll(_coupleId));
       // Ensure E2EE is set up and key is backed up
       await _checkE2EESetup();
-      // Proactively offer the local backup folder — asked once, not buried
-      // in Settings, so it's set up before the first backup run below can
-      // benefit from it. Never blocks startup: dismissible, and only
-      // re-prompts if the user genuinely hasn't decided yet (not on every
-      // launch — see _maybeOfferLocalBackupFolder's own guard).
-      await _maybeOfferLocalBackupFolder();
       // Fresh installs have no local backup cursor even if a backup already
       // exists on Drive from before — fix that display gap before (and
       // independent of) the full backup pipeline below, which can bail out
@@ -236,108 +229,6 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                     fontSize: 15,
                     fontWeight: FontWeight.bold,
                   ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  static const _localBackupFolderPromptedKey = 'local_backup_folder_prompted';
-
-  /// Proactively offers the local SAF backup folder once — not hidden in
-  /// Settings/Backup screen (still reachable there for later setup/
-  /// changing it). Android's Storage Access Framework requires a real
-  /// user-initiated picker interaction to grant folder access; there is no
-  /// way to make this fully silent/automatic — this is the closest to
-  /// "on by default" that's actually possible: the app asks once, rather
-  /// than waiting for the user to discover it.
-  Future<void> _maybeOfferLocalBackupFolder() async {
-    if (!mounted) return;
-    final localFolder = LocalFolderService();
-    if (await localFolder.isConnected()) return;
-
-    final prefs = await SharedPreferences.getInstance();
-    if (prefs.getBool(_localBackupFolderPromptedKey) == true) return;
-
-    if (!mounted) return;
-    await showModalBottomSheet(
-      context: context,
-      isDismissible: false,
-      enableDrag: false,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => PopScope(
-        canPop: false,
-        child: Container(
-          margin: const EdgeInsets.all(24),
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(28),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.08),
-                blurRadius: 20,
-                spreadRadius: 4,
-              )
-            ],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                '📁 Local Backup Folder',
-                style: GoogleFonts.playfairDisplay(
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
-                  color: AppTheme.textDark,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'Keep an extra copy of your backups on this device, independent '
-                'of Google Drive. It stays available even if Drive is full or '
-                'offline, and survives uninstalling and reinstalling Tether. '
-                'Pick any folder — Tether creates its own "Tether" folder '
-                'inside it.',
-                style: GoogleFonts.dmSans(
-                  fontSize: 14,
-                  color: AppTheme.textMuted,
-                  height: 1.5,
-                ),
-              ),
-              const SizedBox(height: 24),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.primary,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                  elevation: 0,
-                ),
-                onPressed: () async {
-                  HapticFeedback.mediumImpact();
-                  await localFolder.pickFolder();
-                  await prefs.setBool(_localBackupFolderPromptedKey, true);
-                  if (ctx.mounted) Navigator.pop(ctx);
-                },
-                child: Text(
-                  'Choose Folder',
-                  style: GoogleFonts.dmSans(fontSize: 15, fontWeight: FontWeight.bold),
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextButton(
-                onPressed: () async {
-                  await prefs.setBool(_localBackupFolderPromptedKey, true);
-                  if (ctx.mounted) Navigator.pop(ctx);
-                },
-                child: Text(
-                  'Not Now',
-                  style: GoogleFonts.dmSans(fontSize: 14, color: AppTheme.textMuted),
                 ),
               ),
             ],

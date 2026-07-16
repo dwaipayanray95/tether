@@ -473,20 +473,13 @@ class BackupService {
   }
 
   /// Same encrypted-JSON format as Drive's copy (see _writeLocalBackup),
-  /// just read from the local SAF folder instead. Requires the user to have
-  /// (re-)picked the folder on this install — on fresh installs the
-  /// persisted URI permission from a previous install doesn't carry over
-  /// (Android ties it to the app's package), so this only helps once
-  /// they've reconnected it, same as the Diagnostics screen already asks
-  /// them to do for the folder picker generally.
+  /// just read from Documents/Tether/backups instead. Always available —
+  /// the folder is auto-created via MediaStore, no user setup step to have
+  /// skipped.
   Future<BackupSnapshot?> _downloadAndDecryptFromLocalFolder(SecretKey sharedKey) async {
-    if (!await _localFolder.isConnected()) return null;
-    final files = await _localFolder.listBackups();
-    final match = files.where((f) => f.name == BackupConfig.latestBackupFileName);
-    if (match.isEmpty) return null;
-    final bytes = await _localFolder.readBackup(match.first.uri);
+    final bytes = await _localFolder.readBackup(BackupConfig.latestBackupFileName);
     if (bytes == null) return null;
-    LogService.log('Backup: restoring from local SAF folder (Drive unavailable)');
+    LogService.log('Backup: restoring from local folder (Documents/Tether/backups)');
     return _decodeSnapshot(bytes, sharedKey);
   }
 
@@ -517,15 +510,14 @@ class BackupService {
   }
 
   /// Best-effort local-first copy, independent of whether Drive itself
-  /// succeeds — this is what makes the local SAF folder useful even when
-  /// Drive is full/offline: encrypt once here, write it locally BEFORE
-  /// attempting Drive, so a later Drive failure never costs the user a
-  /// local copy they'd already have gotten. Same filename as Drive's own
-  /// "latest" file — unlike Drive, there's no separate pending/rotate
-  /// dance locally; Drive already covers historical generations, so the
-  /// local copy is deliberately just the single newest snapshot.
+  /// succeeds — this is what makes the local folder useful even when Drive
+  /// is full/offline: encrypt once here, write it locally BEFORE attempting
+  /// Drive, so a later Drive failure never costs the user a local copy
+  /// they'd already have gotten. Same filename as Drive's own "latest"
+  /// file — unlike Drive, there's no separate pending/rotate dance
+  /// locally; Drive already covers historical generations, so the local
+  /// copy is deliberately just the single newest snapshot.
   Future<bool> _writeLocalBackup(BackupSnapshot snapshot, SecretKey sharedKey) async {
-    if (!await _localFolder.isConnected()) return false;
     try {
       final encryptedBytes = await _encrypt(snapshot, sharedKey);
       final ok = await _localFolder.writeBackup(
@@ -597,8 +589,6 @@ class BackupService {
   Future<void> _syncSnaps() async {
     final storage = LocalStorageService();
 
-    final localFolderConnected = await _localFolder.isConnected();
-
     final pendingUploads = await storage.pendingUploadSnaps();
     for (final snap in pendingUploads) {
       try {
@@ -607,13 +597,11 @@ class BackupService {
         if (driveFileId != null) {
           await storage.updateDriveFileId(snap.id, driveFileId);
         }
-        // Write-through to the local SAF folder too — same batched-into-
+        // Write-through to the local folder too — same batched-into-
         // backup-cycle reasoning as the Drive upload above, and this is
         // what makes a snap recoverable after uninstall/reinstall even if
         // Drive was never reached (space, network) for this particular run.
-        if (localFolderConnected) {
-          await _localFolder.writeSnap('snap_${snap.id}.png', bytes, 'image/png');
-        }
+        await _localFolder.writeSnap('snap_${snap.id}.png', bytes, 'image/png');
       } catch (e) {
         LogService.log('Backup: snap upload failed for ${snap.id}: $e');
       }

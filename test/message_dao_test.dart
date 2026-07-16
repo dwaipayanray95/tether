@@ -22,17 +22,6 @@ void main() {
     await db.close();
   });
 
-  MessagesCompanion _msg(String id, int sentAt) {
-    return MessagesCompanion.insert(
-      id: id,
-      senderId: 'ray-uid',
-      textContent: 'msg $id',
-      type: 'text',
-      sentAt: sentAt,
-      updatedAt: sentAt,
-    );
-  }
-
   test('fetchPage returns newest-first order', () async {
     await dao.upsertBatch([
       _msg('a', 100),
@@ -211,4 +200,15 @@ void main() {
       expect(DateTime.tryParse(map['sentAt'] as String), isNotNull);
     });
   });
+}
+
+MessagesCompanion _msg(String id, int sentAt) {
+  return MessagesCompanion.insert(
+    id: id,
+    senderId: 'ray-uid',
+    textContent: 'msg $id',
+    type: 'text',
+    sentAt: sentAt,
+    updatedAt: sentAt,
+  );
 }

@@ -1,7 +1,7 @@
 name: tether
 description: "Tether - Raayyy & Aproo"
 publish_to: 'none'
-version: 3.3.3+92
+version: 3.3.4+93
 
 environment:
   sdk: '>=3.12.0 <4.0.0'
@@ -56,12 +56,6 @@ dependencies:
   drift: ^2.28.2
   sqlite3_flutter_libs: ^0.6.0+eol
   path: ^1.9.1
-
-  # Persistent on-device backup folder (Android Storage Access Framework) —
-  # survives app uninstall/reinstall, unlike app-private storage. See
-  # LocalFolderService / AGENTS.md.
-  saf_util: ^3.1.0
-  saf_stream: ^3.1.0
 
 dev_dependencies:
   flutter_test:
