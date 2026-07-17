@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## v3.3.6-test (2026-07-18)
+
+### Fixed
+- fix: harden local/Drive backup and headless sync against data loss, cross-account leakage, and silent failures
+
+### Other Changes
+- chore: update CHANGELOG.md [skip ci]
+
 ## v3.3.5 (2026-07-16)
 
 ### Other Changes
