@@ -130,7 +130,7 @@ export const exchangeGoogleAuthCode = onCall<ExchangeRequest>(
 
     const data = (await response.json()) as GoogleTokenResponse;
 
-    if (!response.ok || !data.refresh_token) {
+    if (!response.ok) {
       // Never log the request body (contains the auth code) or response
       // body (would contain the refresh token if present) — only the
       // error fields, which don't carry secrets.
@@ -142,6 +142,24 @@ export const exchangeGoogleAuthCode = onCall<ExchangeRequest>(
       throw new HttpsError(
         "internal",
         `Google token exchange failed: ${data.error ?? "unknown error"}`
+      );
+    }
+
+    if (!data.refresh_token) {
+      // Google omits refresh_token on a code exchange when this Google
+      // account has already granted this Web client offline access before
+      // (e.g. re-signing in after an uninstall wiped the client's stored
+      // token, but the server-side grant is still on file) — the exchange
+      // itself succeeded, there's just nothing new to hand back. This is
+      // NOT the same failure as the block above, so it gets its own code
+      // ("failed-precondition", distinct from "internal") — the client
+      // uses that to trigger a one-time disconnect+re-authorize instead of
+      // silently giving up on background sync forever.
+      logger.warn("exchangeGoogleAuthCode: exchange succeeded but no refresh_token " +
+        "returned (likely already-granted offline access)", {callerEmail});
+      throw new HttpsError(
+        "failed-precondition",
+        "no_refresh_token: Google did not return a refresh token for this grant."
       );
     }
 

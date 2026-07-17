@@ -84,10 +84,6 @@ class MainActivity : FlutterActivity() {
                         val fileName = call.argument<String>("fileName")!!
                         result.success(mediaStoreReadFile(relativePath, fileName))
                     }
-                    "listFiles" -> {
-                        val relativePath = call.argument<String>("relativePath")!!
-                        result.success(mediaStoreListFiles(relativePath))
-                    }
                     else -> result.notImplemented()
                 }
             } catch (e: Exception) {
@@ -131,7 +127,11 @@ class MainActivity : FlutterActivity() {
         val existingUri = findMediaStoreFile(relativePath, fileName)
         if (existingUri != null) {
             return try {
-                resolver.openOutputStream(existingUri, "wt")?.use { it.write(bytes) }
+                // openOutputStream can return null (e.g. the row exists but its
+                // backing file was removed externally) — that must be reported
+                // as a failed write, not a silent no-op success.
+                val stream = resolver.openOutputStream(existingUri, "wt") ?: return false
+                stream.use { it.write(bytes) }
                 true
             } catch (e: Exception) {
                 false
@@ -168,35 +168,6 @@ class MainActivity : FlutterActivity() {
         } catch (e: Exception) {
             null
         }
-    }
-
-    private fun mediaStoreListFiles(relativePath: String): List<Map<String, Any>> {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            return legacyListFiles(relativePath)
-        }
-        val resolver = contentResolver
-        val collection = MediaStore.Files.getContentUri("external")
-        val projection = arrayOf(
-            MediaStore.MediaColumns.DISPLAY_NAME,
-            MediaStore.MediaColumns.DATE_MODIFIED
-        )
-        val selection = "${MediaStore.MediaColumns.RELATIVE_PATH} = ?"
-        val args = arrayOf(normalizedRelativePath(relativePath))
-        val result = mutableListOf<Map<String, Any>>()
-        resolver.query(collection, projection, selection, args, null)?.use { cursor ->
-            val nameIdx = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
-            val dateIdx = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED)
-            while (cursor.moveToNext()) {
-                result.add(
-                    mapOf(
-                        "name" to cursor.getString(nameIdx),
-                        // DATE_MODIFIED is in seconds since epoch; Dart side expects millis.
-                        "lastModified" to (cursor.getLong(dateIdx) * 1000L)
-                    )
-                )
-            }
-        }
-        return result
     }
 
     private fun findMediaStoreFile(relativePath: String, fileName: String): Uri? {
@@ -246,16 +217,6 @@ class MainActivity : FlutterActivity() {
             if (!file.exists()) null else file.readBytes()
         } catch (e: Exception) {
             null
-        }
-    }
-
-    private fun legacyListFiles(relativePath: String): List<Map<String, Any>> {
-        return try {
-            legacyDir(relativePath).listFiles()?.filter { it.isFile }?.map {
-                mapOf("name" to it.name, "lastModified" to it.lastModified())
-            } ?: emptyList()
-        } catch (e: Exception) {
-            emptyList()
         }
     }
 

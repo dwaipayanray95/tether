@@ -1,12 +1,6 @@
+import 'dart:io';
 import 'package:flutter/services.dart';
 import 'log_service.dart';
-
-/// One file's metadata as returned by [LocalFolderService.listBackups].
-class LocalFolderFile {
-  final String name;
-  final DateTime lastModified;
-  const LocalFolderFile({required this.name, required this.lastModified});
-}
 
 /// Manages an automatically-created "Documents/Tether" folder on the
 /// device's shared storage, used as a local-first backup destination —
@@ -48,29 +42,11 @@ class LocalFolderService {
   Future<bool> writeSnap(String fileName, Uint8List bytes, String mime) =>
       _writeFile(_snapsPath, fileName, bytes, mime);
 
-  /// Lists files currently in Documents/Tether/backups — used by
-  /// LocalDbHydrationService/BackupService as a recovery/freshness-
-  /// comparison source alongside Drive.
-  Future<List<LocalFolderFile>> listBackups() async {
-    try {
-      final raw = await _channel.invokeMethod<List<Object?>>(
-          'listFiles', {'relativePath': _backupsPath});
-      if (raw == null) return [];
-      return raw
-          .cast<Map<Object?, Object?>>()
-          .map((m) => LocalFolderFile(
-                name: m['name'] as String,
-                lastModified:
-                    DateTime.fromMillisecondsSinceEpoch(m['lastModified'] as int),
-              ))
-          .toList();
-    } catch (e) {
-      LogService.log('LocalFolderService: listBackups failed: $e');
-      return [];
-    }
-  }
-
   Future<Uint8List?> readBackup(String fileName) async {
+    // No native handler for this channel exists on iOS (see MainActivity.kt
+    // — Android-only) — short-circuit instead of relying on the platform
+    // throwing MissingPluginException on every call.
+    if (!Platform.isAndroid) return null;
     try {
       final bytes = await _channel.invokeMethod<Uint8List>(
           'readFile', {'relativePath': _backupsPath, 'fileName': fileName});
@@ -83,6 +59,7 @@ class LocalFolderService {
 
   Future<bool> _writeFile(
       String relativePath, String fileName, Uint8List bytes, String mimeType) async {
+    if (!Platform.isAndroid) return false;
     try {
       final ok = await _channel.invokeMethod<bool>('writeFile', {
         'relativePath': relativePath,

@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
@@ -202,6 +203,13 @@ class _BackupScreenState extends State<BackupScreen> {
             'only need to tap "Backup Now" if you want to back up sooner.',
             style: GoogleFonts.dmSans(fontSize: 12, color: AppTheme.textMuted),
           ),
+          // The MediaStore local-folder channel (LocalFolderService) is only
+          // implemented natively on Android — there's no iOS handler for
+          // "com.theawesomeray.tether/mediastore", so every call there
+          // throws MissingPluginException and is swallowed to false/null.
+          // Showing this card on iOS would promise a local copy that can
+          // never actually exist.
+          if (Platform.isAndroid) ...[
           const SizedBox(height: 32),
           Text(
             'Local Backup Folder',
@@ -244,6 +252,7 @@ class _BackupScreenState extends State<BackupScreen> {
               ],
             ),
           ),
+          ],
         ],
       ),
     );

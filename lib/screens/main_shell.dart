@@ -113,6 +113,16 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         Permission.microphone,
         Permission.camera,
         Permission.phone,
+        // Backs the local-folder backup/snap write-through (see
+        // LocalFolderService): required at runtime on Android 7-9 for the
+        // legacy File-IO fallback (MediaStore's RELATIVE_PATH column
+        // doesn't exist pre-API 29), and on Android 10-12 it additionally
+        // widens MediaStore query visibility beyond just this app's own
+        // rows — relevant after an uninstall/reinstall, where the fresh
+        // install would otherwise not see the previous install's backup
+        // file. No-ops harmlessly on iOS/Android 13+, where it isn't
+        // requestable/needed.
+        Permission.storage,
       ];
 
       LogService.log('Requesting Standard Permissions Batch...');

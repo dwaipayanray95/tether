@@ -201,6 +201,10 @@ class BackupService {
   }
 
   Future<BackupRunResult> _runBackupLocked() async {
+    // Tracked outside the try so a later step throwing (e.g. Drive upload
+    // failing after the local write already succeeded) doesn't lose the
+    // fact that a durable local copy exists — see the catch block below.
+    bool localBackupWrittenBeforeFailure = false;
     try {
       final cursor = await _cursorStore.load();
 
@@ -278,21 +282,24 @@ class BackupService {
         preferences: await _currentAllowlistedPreferences(),
       );
 
-      // 4a. Local-first: write to the on-device SAF backup folder (if
-      // connected) BEFORE attempting Drive at all. This is what makes the
-      // local folder a real fallback — if Drive is full/offline/fails below,
-      // this run has already produced a durable, on-device, uninstall-
-      // surviving copy regardless of Drive's outcome.
-      final localBackupWritten = await _writeLocalBackup(merged, sharedKey);
+      // 4a. Encrypt once — reused for both the Drive pending file and the
+      // local folder write below, rather than encrypting the same snapshot
+      // twice.
+      final encryptedBytes = await _encrypt(merged, sharedKey);
 
-      // 4b. Encrypt and upload as the pending file — the last known-good
-      // backup is untouched until this is verified.
-      final backupSizeBytes =
-          await _encryptAndUpload(merged, sharedKey, BackupConfig.pendingBackupFileName);
+      // 4b. Upload as the pending file — the last known-good backup on
+      // Drive is untouched until this is verified below.
+      await _drive.uploadOrReplaceBytes(BackupConfig.pendingBackupFileName, encryptedBytes);
+      final backupSizeBytes = encryptedBytes.length;
 
       // 5. Integrity check: the backup must never contain fewer live
       // records than Firestore currently has (it's fine for it to have
-      // more, once purging of old messages is introduced later).
+      // more, once purging of old messages is introduced later). Gates
+      // BOTH the Drive promotion below and the local-folder write — a
+      // snapshot that fails this check must never become the on-device
+      // "latest" copy either, since restoreFromBackup() picks whichever of
+      // Drive/local has the newest generatedAt and would otherwise prefer
+      // a known-bad local copy over a good Drive one.
       final integrity = await _verifyIntegrity(merged);
       if (!integrity.ok) {
         const msg = 'Integrity check failed, aborting promotion';
@@ -304,9 +311,13 @@ class BackupService {
           comments: mergedComments.length,
           messages: mergedMessages.length,
           stickyNotes: mergedStickyNotes.length,
-          localBackupWritten: localBackupWritten,
         );
       }
+
+      // 5a. Local-first write, now that the snapshot has passed integrity —
+      // best-effort, independent of Drive's own outcome below.
+      final localBackupWritten = await _writeLocalBackup(encryptedBytes);
+      localBackupWrittenBeforeFailure = localBackupWritten;
 
       // 6. Rotate existing generations to make room, then promote.
       await _rotateGenerations();
@@ -361,7 +372,11 @@ class BackupService {
     } catch (e) {
       final msg = 'Run failed: $e';
       LogService.log('Backup Error: $msg');
-      return BackupRunResult(success: false, message: msg);
+      return BackupRunResult(
+        success: false,
+        message: msg,
+        localBackupWritten: localBackupWrittenBeforeFailure,
+      );
     }
   }
 
@@ -476,11 +491,22 @@ class BackupService {
   /// just read from Documents/Tether/backups instead. Always available —
   /// the folder is auto-created via MediaStore, no user setup step to have
   /// skipped.
+  ///
+  /// Deliberately never throws: this is one of two independent sources
+  /// restoreFromBackup() tries, and a truncated/corrupt/wrong-key local
+  /// file must not take down a restore that already has a perfectly good
+  /// Drive backup in hand — it should just be treated the same as "no
+  /// local backup exists" and fall through to Drive.
   Future<BackupSnapshot?> _downloadAndDecryptFromLocalFolder(SecretKey sharedKey) async {
-    final bytes = await _localFolder.readBackup(BackupConfig.latestBackupFileName);
-    if (bytes == null) return null;
-    LogService.log('Backup: restoring from local folder (Documents/Tether/backups)');
-    return _decodeSnapshot(bytes, sharedKey);
+    try {
+      final bytes = await _localFolder.readBackup(BackupConfig.latestBackupFileName);
+      if (bytes == null) return null;
+      LogService.log('Backup: restoring from local folder (Documents/Tether/backups)');
+      return await _decodeSnapshot(bytes, sharedKey);
+    } catch (e) {
+      LogService.log('Backup: local folder backup unreadable, ignoring it: $e');
+      return null;
+    }
   }
 
   Future<BackupSnapshot> _decodeSnapshot(Uint8List bytes, SecretKey sharedKey) async {
@@ -500,26 +526,16 @@ class BackupService {
     return Uint8List.fromList(utf8.encode(jsonEncode(envelope)));
   }
 
-  /// Returns the uploaded byte size, so callers can record it for display
-  /// (e.g. "Backup: 128 KB, just now" in the user-facing Backup screen).
-  Future<int> _encryptAndUpload(
-      BackupSnapshot snapshot, SecretKey sharedKey, String fileName) async {
-    final encryptedBytes = await _encrypt(snapshot, sharedKey);
-    await _drive.uploadOrReplaceBytes(fileName, encryptedBytes);
-    return encryptedBytes.length;
-  }
-
   /// Best-effort local-first copy, independent of whether Drive itself
   /// succeeds — this is what makes the local folder useful even when Drive
-  /// is full/offline: encrypt once here, write it locally BEFORE attempting
-  /// Drive, so a later Drive failure never costs the user a local copy
-  /// they'd already have gotten. Same filename as Drive's own "latest"
-  /// file — unlike Drive, there's no separate pending/rotate dance
-  /// locally; Drive already covers historical generations, so the local
-  /// copy is deliberately just the single newest snapshot.
-  Future<bool> _writeLocalBackup(BackupSnapshot snapshot, SecretKey sharedKey) async {
+  /// is full/offline. Takes already-encrypted bytes (same ones uploaded to
+  /// Drive, computed once by the caller) so the snapshot is never encrypted
+  /// twice per run. Same filename as Drive's own "latest" file — unlike
+  /// Drive, there's no separate pending/rotate dance locally; Drive already
+  /// covers historical generations, so the local copy is deliberately just
+  /// the single newest snapshot.
+  Future<bool> _writeLocalBackup(Uint8List encryptedBytes) async {
     try {
-      final encryptedBytes = await _encrypt(snapshot, sharedKey);
       final ok = await _localFolder.writeBackup(
           BackupConfig.latestBackupFileName, encryptedBytes);
       if (ok) LogService.log('Backup: local copy written (${encryptedBytes.length} bytes)');
