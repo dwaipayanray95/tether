@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased (2026-07-18)
+
+### Other Changes
+- ci: remove ez-pipeline in favor of a proper quality gate on build-apk.yml
+- chore: remove unused dependencies
+- chore: deprovision Firebase Storage from the repo
+
 ## v3.3.6-test (2026-07-18)
 
 ### Fixed
