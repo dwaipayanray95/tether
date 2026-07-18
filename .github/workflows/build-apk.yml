@@ -10,8 +10,50 @@ permissions:
   contents: write
 
 jobs:
+  quality-gate:
+    name: Quality Gate (Analyze, Test, License, Secrets)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan for leaked secrets
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          extra_args: --results=verified,unknown
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Get Dependencies
+        run: flutter pub get
+
+      - name: Static analysis
+        run: flutter analyze
+
+      - name: Run tests
+        run: flutter test
+
+      - name: Dependency license check
+        run: |
+          dart pub global activate license_checker
+          export PATH="$PATH":"$HOME/.pub-cache/bin"
+          # Config lives at tool/license_checker.yaml — permitted/rejected
+          # license lists plus the small set of Flutter-SDK-bundled packages
+          # that need explicit approval (see comments in that file). Exits
+          # non-zero if any dependency's license isn't permitted/approved.
+          lic_ck check-licenses -c tool/license_checker.yaml -i
+
   build:
     name: Build arm64-v8a Release APK
+    needs: quality-gate
     runs-on: ubuntu-latest
 
     steps:
