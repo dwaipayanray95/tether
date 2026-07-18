@@ -32,6 +32,35 @@ jobs:
           channel: 'stable'
           cache: true
 
+      - name: Restore Configuration Secrets
+        env:
+          NOTIFICATION_CONFIG: ${{ secrets.NOTIFICATION_CONFIG_DART }}
+          ENV_CONFIG: ${{ secrets.ENV_CONFIG_DART }}
+        run: |
+          # Same gitignored config files the build job restores (see its
+          # "Restore Keystore & Configuration Secrets" step) — analyze/test
+          # need these to exist too, just not the signing keystore.
+          mkdir -p lib/config
+          if [ ! -z "$NOTIFICATION_CONFIG" ]; then
+            echo "$NOTIFICATION_CONFIG" > lib/config/notification_config.dart
+          else
+            echo "class NotificationConfig {" > lib/config/notification_config.dart
+            echo "  static const projectId = 'tether-8d3fa';" >> lib/config/notification_config.dart
+            echo "  static const clientEmail = 'dummy@tether-8d3fa.iam.gserviceaccount.com';" >> lib/config/notification_config.dart
+            echo "  static const privateKey = '-----BEGIN PRIVATE KEY-----\nIA==\n-----END PRIVATE KEY-----\n';" >> lib/config/notification_config.dart
+            echo "}" >> lib/config/notification_config.dart
+          fi
+
+          if [ ! -z "$ENV_CONFIG" ]; then
+            echo "$ENV_CONFIG" > lib/config/env_config.dart
+          else
+            echo "class EnvConfig {" > lib/config/env_config.dart
+            echo "  static const allowedEmails = ['user1@example.com', 'user2@example.com'];" >> lib/config/env_config.dart
+            echo "  static const coupleId = 'dummy-couple-id';" >> lib/config/env_config.dart
+            echo "  static const googleWebServerClientId = '';" >> lib/config/env_config.dart
+            echo "}" >> lib/config/env_config.dart
+          fi
+
       - name: Get Dependencies
         run: flutter pub get
 
