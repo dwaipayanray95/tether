@@ -70,7 +70,7 @@ Google Drive backup / local backup folder (permanent full-history archive)
 
 One unified, incremental pipeline (`BackupService.runBackup()`) handles messages, to-dos, comments, sticky notes, profiles, the couple document, an allowlisted set of app preferences, and photo snaps — all synced together in one cycle, not as separate ad-hoc Drive calls.
 
-- **Dual destination:** every run writes to a persistent, user-picked on-device folder (via Android's Storage Access Framework — survives app uninstall, unlike normal app storage) *before* attempting Google Drive, so a full/offline Drive never costs you a backup.
+- **Dual destination:** every run writes to an auto-created `Documents/Tether` folder on-device (via Android's MediaStore — survives app uninstall, unlike normal app storage, and needs no folder-picker) *before* attempting Google Drive, so a full/offline Drive never costs you a backup.
 - **Safety model:** a new backup is written to a "pending" file, integrity-checked against live Firestore record counts, and only then promoted over the last known-good backup — nothing is ever overwritten speculatively.
 - **Restore freshness:** on restore, both the Drive copy and the local-folder copy are checked, and whichever is actually newer (compared via the backup's own embedded generation timestamp) is used — not just "Drive if reachable."
 - **Cadence:** checked on every app open/resume, runs at most once every 24 hours per device. See [Optional: Headless Background Sync](#optional-headless-background-sync) for extending this to run without the app being open.
@@ -85,10 +85,10 @@ Push notifications (chat, pokes, snaps, to-do updates) are sent via FCM's HTTP v
 |---|---|
 | Client | Flutter (Android; iOS scaffolding present but Android is the maintained target) |
 | Local database | [Drift](https://drift.simonbinder.eu/) (SQLite) |
-| Backend | Firebase — Firestore, Realtime Database, Cloud Storage, FCM, Cloud Functions |
+| Backend | Firebase — Firestore, FCM, Cloud Functions |
 | Auth | Google Sign-In (`google_sign_in` v7, Credential Manager-based) |
 | Encryption | `cryptography` package — X25519 + AES-GCM |
-| Local persistent backup | Android Storage Access Framework (`saf_util` / `saf_stream`) |
+| Local persistent backup | Android MediaStore (native Kotlin platform channel) |
 | Push | Firebase Cloud Messaging (HTTP v1, service-account JWT auth) |
 
 ## Project Structure
@@ -115,7 +115,7 @@ For a deeper reference (file-by-file feature map, database schemas, hard rules f
 ### Prerequisites
 
 - Flutter SDK (see `environment.sdk` in `pubspec.yaml` for the exact constraint)
-- A Firebase project (Firestore, Realtime Database, Storage, and FCM enabled)
+- A Firebase project (Firestore and FCM enabled)
 - Android Studio / an Android SDK for building and running
 
 ### Firebase Setup
@@ -194,7 +194,7 @@ See `functions/src/index.ts` for the full explanation and setup notes. Left unco
 ## Security Notes
 
 - All chat/comment content is end-to-end encrypted; Firestore, the local database, and both backup destinations only ever store ciphertext.
-- Firestore and Storage security rules restrict all reads/writes to an explicit allowlist of two account emails (see `firestore.rules` / `storage.rules`) — this app is not currently open to arbitrary signups (see [Roadmap](#roadmap)).
+- Firestore security rules restrict all reads/writes to an explicit allowlist of two account emails (see `firestore.rules`) — this app is not currently open to arbitrary signups (see [Roadmap](#roadmap)).
 - No secrets, API keys, or personal information are committed to this repository — everything sensitive is injected at build/deploy time via gitignored config files or CI secrets.
 - Found a security issue? Please report it privately rather than opening a public issue.
 
