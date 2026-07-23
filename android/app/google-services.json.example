@@ -1,41 +1,41 @@
 {
   "project_info": {
-    "project_number": "159030423389",
-    "project_id": "tether-8d3fa",
-    "storage_bucket": "tether-8d3fa.firebasestorage.app"
+    "project_number": "YOUR_PROJECT_NUMBER",
+    "project_id": "your-project-id",
+    "storage_bucket": "your-project-id.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:159030423389:android:91fa07257c2cd097a882b4",
+        "mobilesdk_app_id": "1:YOUR_PROJECT_NUMBER:android:xxxxxxxxxxxxxxxx",
         "android_client_info": {
           "package_name": "com.theawesomeray.tether"
         }
       },
       "oauth_client": [
         {
-          "client_id": "159030423389-mvjfacnbs5409ic1fugb3335e2gc65ou.apps.googleusercontent.com",
+          "client_id": "YOUR_PROJECT_NUMBER-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
             "package_name": "com.theawesomeray.tether",
-            "certificate_hash": "08b2af60be28634cf333f30bf7401166e280f965"
+            "certificate_hash": "your_release_keystore_sha1_lowercase_no_colons"
           }
         },
         {
-          "client_id": "159030423389-afh9tvj7u396q3nvdo0fiasakgu8erbu.apps.googleusercontent.com",
+          "client_id": "YOUR_PROJECT_NUMBER-yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy.apps.googleusercontent.com",
           "client_type": 3
         }
       ],
       "api_key": [
         {
-          "current_key": "AIzaSyCrk44Z9tdR65LnDljKyDrNSHWn12N38nw"
+          "current_key": "YOUR_ANDROID_API_KEY"
         }
       ],
       "services": {
         "appinvite_service": {
           "other_platform_oauth_client": [
             {
-              "client_id": "159030423389-afh9tvj7u396q3nvdo0fiasakgu8erbu.apps.googleusercontent.com",
+              "client_id": "YOUR_PROJECT_NUMBER-yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy.apps.googleusercontent.com",
               "client_type": 3
             }
           ]

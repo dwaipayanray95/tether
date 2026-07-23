@@ -106,9 +106,21 @@ jobs:
         env:
           NOTIFICATION_CONFIG: ${{ secrets.NOTIFICATION_CONFIG_DART }}
           ENV_CONFIG: ${{ secrets.ENV_CONFIG_DART }}
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
           KEY_PROPERTIES: ${{ secrets.KEY_PROPERTIES }}
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
+          # 0. Restore google-services.json (gitignored — see
+          # android/app/google-services.json.example for the shape). Without
+          # it the Google Services Gradle plugin fails the build outright,
+          # so there's no meaningful dummy fallback like the two below.
+          if [ ! -z "$GOOGLE_SERVICES_JSON" ]; then
+            echo "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
+          else
+            echo "::error::GOOGLE_SERVICES_JSON secret is not set — cannot build without it."
+            exit 1
+          fi
+
           # 1. Restore FCM Notification Config
           mkdir -p lib/config
           if [ ! -z "$NOTIFICATION_CONFIG" ]; then

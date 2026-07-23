@@ -1,6 +1,7 @@
 # Sensitive config — never commit
 lib/config/notification_config.dart
 lib/config/env_config.dart
+android/app/google-services.json
 
 # Functions build output and dependencies
 functions/lib/

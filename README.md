@@ -121,7 +121,7 @@ For a deeper reference (file-by-file feature map, database schemas, hard rules f
 ### Firebase Setup
 
 1. Create a Firebase project and add an Android app with package name `com.theawesomeray.tether` (or update `applicationId` in `android/app/build.gradle.kts` to your own).
-2. Download `google-services.json` into `android/app/`.
+2. Download `google-services.json` into `android/app/` (gitignored — see `android/app/google-services.json.example` for the expected shape).
 3. Deploy the included security rules and indexes:
    ```
    firebase deploy --only firestore:rules,firestore:indexes,storage
@@ -189,7 +189,7 @@ See `functions/src/index.ts` for the full explanation and setup notes. Left unco
 
 ## CI / Release Builds
 
-`.github/workflows/build-apk.yml` builds a release APK on tag push / manual dispatch. It restores the two gitignored config files above from GitHub Actions secrets (`ENV_CONFIG_DART`, `NOTIFICATION_CONFIG_DART`), along with the signing keystore (`KEYSTORE_BASE64`, `KEY_PROPERTIES`) and the Maps API key (`MAPS_API_KEY`). Forked/external PR builds fall back to dummy placeholder values so the build still type-checks without exposing real secrets.
+`.github/workflows/build-apk.yml` has a `quality-gate` job (static analysis, tests, dependency license check, secret scan) that must pass before the `build` job runs. `build` restores the gitignored config files above from GitHub Actions secrets — `ENV_CONFIG_DART`, `NOTIFICATION_CONFIG_DART`, `GOOGLE_SERVICES_JSON` (raw file contents) — along with the signing keystore (`KEYSTORE_BASE64`, `KEY_PROPERTIES`). `ENV_CONFIG_DART`/`NOTIFICATION_CONFIG_DART` fall back to dummy placeholder values if unset so ad-hoc/forked runs still type-check without exposing real secrets; `GOOGLE_SERVICES_JSON` has no such fallback since the Android build can't proceed without it at all.
 
 ## Security Notes
 
